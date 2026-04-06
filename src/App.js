@@ -73,14 +73,59 @@ export default function App() {
     });
   }, []);
 
-  // Tvinger baggrundsfarven på body, for at undgå hvide kanter
   useEffect(() => {
     document.body.style.backgroundColor = theme.bg;
     document.body.style.margin = "0";
   }, []);
 
+  // --- DATO & SÆSON LOGIK ---
   const getTodayDate = () => new Date().toISOString().split('T')[0];
+  
+  const currentMonthStr = getTodayDate().substring(0, 7); // f.eks. "2026-04"
+  const getPrevMonthStr = () => {
+    const d = new Date();
+    d.setMonth(d.getMonth() - 1);
+    return d.toISOString().substring(0, 7);
+  };
+  const prevMonthStr = getPrevMonthStr();
 
+  const monthNames = ["Januar", "Februar", "Marts", "April", "Maj", "Juni", "Juli", "August", "September", "Oktober", "November", "December"];
+  const currentMonthName = monthNames[new Date().getMonth()];
+
+  // Udregner stats for en specifik måned
+  const getStatsForMonth = (history = [], monthPrefix) => {
+    let gym = 0, cardioKm = 0, cardioRuns = 0;
+    history.forEach(h => {
+      const d = typeof h === 'string' ? h : h.date;
+      if (d.startsWith(monthPrefix)) {
+        if (typeof h === 'string' || h.type === 'gym') gym++;
+        else if (h.type === 'cardio') {
+          cardioRuns++;
+          if (h.value) cardioKm += Number(h.value);
+        }
+      }
+    });
+    return { gym, cardioKm: parseFloat(cardioKm.toFixed(1)), totalActivities: gym + cardioRuns };
+  };
+
+  // Finder vinderen af FORRIGE måned (Månedens Dude)
+  const getLastMonthWinner = () => {
+    if (!users.length) return null;
+    let winner = null;
+    let maxScore = 0;
+    users.forEach(u => {
+      const score = getStatsForMonth(u.history, prevMonthStr).totalActivities;
+      if (score > maxScore && score > 0) {
+        maxScore = score;
+        winner = u.id;
+      }
+    });
+    return winner; // Returnerer ID'et på vinderen
+  };
+
+  const lastMonthWinnerId = getLastMonthWinner();
+
+  // Finder ugens MVP (sidste 7 dage)
   const getMVP = () => {
     if (!users.length) return null;
     const sevenDaysAgo = new Date();
@@ -116,12 +161,6 @@ export default function App() {
       else break;
     }
     return streak;
-  };
-
-  const calculateTotalCardio = (history = []) => {
-    const totalKm = history.reduce((sum, entry) => (entry.type === "cardio" && entry.value) ? sum + Number(entry.value) : sum, 0);
-    const totalRuns = history.filter(entry => entry.type === "cardio").length;
-    return { km: totalKm > 0 ? parseFloat(totalKm.toFixed(1)) : 0, runs: totalRuns };
   };
 
   const handleAuth = async (e) => {
@@ -197,7 +236,6 @@ export default function App() {
     setIsUploading(false);
   };
 
-  // --- Hoved Wrapper til at tvinge Dark Mode overalt ---
   const MainWrapper = ({ children }) => (
     <div style={{ minHeight: "100vh", backgroundColor: theme.bg, color: theme.textMain, fontFamily: "sans-serif" }}>
       {children}
@@ -241,7 +279,7 @@ export default function App() {
         {/* MVP OF THE WEEK */}
         {activeTab === "leaderboard" && mvp && (
           <div style={{ background: "linear-gradient(45deg, #F59E0B, #B45309)", padding: "15px", borderRadius: "12px", marginBottom: "20px", textAlign: "center", boxShadow: "0 4px 15px rgba(245, 158, 11, 0.3)" }}>
-            <div style={{ fontSize: "12px", fontWeight: "bold", color: "rgba(0,0,0,0.6)", textTransform: "uppercase" }}>MVP OF THE WEEK 👑</div>
+            <div style={{ fontSize: "12px", fontWeight: "bold", color: "rgba(0,0,0,0.6)", textTransform: "uppercase" }}>MVP OF THE WEEK ⚡</div>
             <div style={{ fontSize: "22px", fontWeight: "900", color: "#000" }}>{mvp.name.toUpperCase()}</div>
             <div style={{ fontSize: "13px", color: "rgba(0,0,0,0.7)", fontWeight: "bold" }}>{mvp.weeklyCount} AKTIVITETER DE SIDSTE 7 DAGE</div>
           </div>
@@ -251,39 +289,56 @@ export default function App() {
         <div style={{ display: "flex", gap: "5px", marginBottom: "20px", background: theme.card, padding: "5px", borderRadius: "10px" }}>
           {["leaderboard", "stats", "chat", "profile"].map(t => (
             <button key={t} onClick={() => setActiveTab(t)} style={{ flex: 1, padding: "10px 0", borderRadius: "8px", border: "none", backgroundColor: activeTab === t ? theme.accent : "transparent", color: activeTab === t ? "#000" : theme.textSub, fontWeight: "bold", fontSize: "12px" }}>
-              {t === "leaderboard" ? "Ranking" : t === "stats" ? "Stats" : t === "chat" ? "Trash Talk" : "Profil"}
+              {t === "leaderboard" ? "Sæson" : t === "stats" ? "Stats" : t === "chat" ? "Trash Talk" : "Profil"}
             </button>
           ))}
         </div>
 
-        {/* RANG-LISTE */}
+        {/* RANG-LISTE (NUVÆRENDE MÅNED) */}
         {activeTab === "leaderboard" && (
           <div>
-            {users.sort((a, b) => b.workouts - a.workouts).map(user => {
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "15px" }}>
+              <h3 style={{ margin: 0, fontSize: "16px", textTransform: "uppercase", color: theme.textSub }}>SÆSON: {currentMonthName}</h3>
+            </div>
+
+            {users
+              .map(u => ({ ...u, currentMonthStats: getStatsForMonth(u.history, currentMonthStr) }))
+              .sort((a, b) => b.currentMonthStats.totalActivities - a.currentMonthStats.totalActivities)
+              .map((user, index) => {
+              
               const isMe = currentUser.uid === user.id;
               const streak = calculateStreak(user.history);
-              const cardio = calculateTotalCardio(user.history);
+              const isLastMonthWinner = user.id === lastMonthWinnerId;
 
               return (
                 <div key={user.id} style={{ background: theme.card, marginBottom: "10px", borderRadius: "12px", border: isMe ? `1px solid ${theme.accent}` : "1px solid #333", overflow: "hidden" }}>
                   <div onClick={() => setExpandedUserId(expandedUserId === user.id ? null : user.id)} style={{ padding: "15px", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                      <img src={user.photoUrl} alt="" style={{ width: "40px", height: "40px", borderRadius: "50%", background: "#444" }} />
+                    
+                    {/* Rank Number & Avatar */}
+                    <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                      <div style={{ fontWeight: "bold", fontSize: "18px", color: index === 0 ? theme.accent : theme.textSub, width: "15px" }}>{index + 1}</div>
+                      <img src={user.photoUrl} alt="" style={{ width: "40px", height: "40px", borderRadius: "50%", background: "#444", objectFit: "cover" }} />
                       <div>
-                        <div style={{ fontWeight: "bold" }}>{user.name}</div>
+                        <div style={{ fontWeight: "bold", fontSize: "15px" }}>
+                          {user.name} {isLastMonthWinner && <span title="Månedens Dude (Forrige Måned)">🏆</span>}
+                        </div>
                         <div style={{ fontSize: "11px", color: theme.accent }}>{streak} dag{streak === 1 ? "" : "e"} streak 🔥</div>
                       </div>
                     </div>
+                    
+                    {/* Månedens Stats */}
                     <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
                       <div style={{ textAlign: "right" }}>
-                        <div style={{ fontWeight: "bold" }}>{user.workouts} 🏋️</div>
-                        <div style={{ fontSize: "11px", color: "#60a5fa" }}>{cardio.km} km 🏃‍♂️</div>
+                        <div style={{ fontWeight: "bold", fontSize: "14px" }}>{user.currentMonthStats.gym} 🏋️</div>
+                        <div style={{ fontSize: "11px", color: "#60a5fa" }}>{user.currentMonthStats.cardioKm} km 🏃‍♂️</div>
                       </div>
                       {isMe && (
                         <button onClick={(e) => { e.stopPropagation(); setShowLogModal(true); }} style={{ padding: "8px 12px", borderRadius: "8px", background: theme.accent, color: "#000", border: "none", fontSize: "12px", fontWeight: "bold" }}>+ Log</button>
                       )}
                     </div>
                   </div>
+                  
+                  {/* Udfoldet Historik */}
                   {expandedUserId === user.id && (
                     <div style={{ padding: "15px", background: "#151515", borderTop: "1px solid #333", fontSize: "13px" }}>
                       <p style={{ color: theme.textSub, margin: "0 0 10px 0", fontStyle: "italic" }}>"{user.bio}"</p>
@@ -294,8 +349,9 @@ export default function App() {
                         )}
                       </div>
                       {[...user.history].reverse().slice(0, 5).map((h, i) => (
-                        <div key={i} style={{ marginBottom: "4px", fontSize: "12px" }}>
-                          {h.type === "gym" ? "🏋️" : "🏃‍♂️"} {h.title} {h.value && `(${h.value} km)`} - {h.date}
+                        <div key={i} style={{ marginBottom: "4px", fontSize: "12px", display: "flex", justifyContent: "space-between" }}>
+                          <span>{h.type === "gym" ? "🏋️" : "🏃‍♂️"} {h.title} {h.value && `(${h.value} km)`}</span>
+                          <span style={{color: theme.textSub}}>{h.date}</span>
                         </div>
                       ))}
                     </div>
@@ -306,15 +362,34 @@ export default function App() {
           </div>
         )}
 
-        {/* STATS */}
+        {/* STATS (ALL-TIME) */}
         {activeTab === "stats" && (
           <div>
             {users.map(user => {
-              const cardio = calculateTotalCardio(user.history);
+              const allTimeCardio = user.history.reduce((sum, h) => (h.type === "cardio" && h.value) ? sum + Number(h.value) : sum, 0);
+              const allTimeRuns = user.history.filter(h => h.type === "cardio").length;
+              const allTimeGym = user.history.filter(h => typeof h === 'string' || h.type === 'gym').length;
               const canEdit = currentUser.uid === user.id || isAdmin;
+              
               return (
                 <div key={user.id} style={{ background: theme.card, padding: "20px", marginBottom: "10px", borderRadius: "12px" }}>
-                  <h3 style={{ margin: "0 0 10px 0" }}>{user.name}</h3>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
+                    <h3 style={{ margin: 0 }}>{user.name}</h3>
+                    {user.id === lastMonthWinnerId && <span style={{fontSize: "20px"}} title="Regerende Månedens Dude">🏆</span>}
+                  </div>
+                  
+                  {/* ALL TIME TOTALS */}
+                  <div style={{ display: "flex", gap: "10px", marginBottom: "20px" }}>
+                    <div style={{ flex: 1, background: theme.inputBg, padding: "10px", borderRadius: "8px", textAlign: "center" }}>
+                      <div style={{ fontSize: "11px", color: theme.textSub, textTransform: "uppercase" }}>Totale Løft</div>
+                      <div style={{ fontSize: "18px", fontWeight: "bold", color: theme.textMain }}>{allTimeGym}</div>
+                    </div>
+                    <div style={{ flex: 1, background: theme.inputBg, padding: "10px", borderRadius: "8px", textAlign: "center" }}>
+                      <div style={{ fontSize: "11px", color: theme.textSub, textTransform: "uppercase" }}>Totale KM</div>
+                      <div style={{ fontSize: "18px", fontWeight: "bold", color: "#60a5fa" }}>{allTimeCardio > 0 ? parseFloat(allTimeCardio.toFixed(1)) : 0}</div>
+                    </div>
+                  </div>
+
                   <div style={{ marginBottom: "15px" }}>
                     <div style={{ fontSize: "12px", color: theme.accent, fontWeight: "bold", marginBottom: "5px" }}>STYRKE (MAKS)</div>
                     {["bench", "squat", "deadlift"].map(lift => (
@@ -322,15 +397,6 @@ export default function App() {
                         <span style={{textTransform: "capitalize"}}>{lift}:</span> <strong>{user.maxLifts[lift]} kg</strong>
                       </div>
                     ))}
-                  </div>
-                  <div>
-                    <div style={{ fontSize: "12px", color: "#60a5fa", fontWeight: "bold", marginBottom: "5px" }}>CARDIO STATUS</div>
-                    <div style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span>Total distance:</span> <strong>{cardio.km} km</strong>
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span>Antal løbeture:</span> <strong>{cardio.runs}</strong>
-                    </div>
                   </div>
                 </div>
               );
