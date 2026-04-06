@@ -40,6 +40,7 @@ export default function App() {
 
   const [myBio, setMyBio] = useState("");
   const [myPhoto, setMyPhoto] = useState("");
+  const [myArc, setMyArc] = useState("Vinter Arc ❄️"); // NY ARC STATE
   const [isUploading, setIsUploading] = useState(false);
 
   const isAdmin = currentUser && currentUser.email === ADMIN_EMAIL;
@@ -47,6 +48,9 @@ export default function App() {
   const theme = {
     bg: "#121212", card: "#1E1E1E", accent: "#F59E0B", textMain: "#F3F4F6", textSub: "#9CA3AF", inputBg: "#374151", border: "#333333"
   };
+
+  // Bugfix: Fast style-objekt i stedet for at pakke det ind i en komponent der re-renderer
+  const mainStyle = { minHeight: "100vh", backgroundColor: theme.bg, color: theme.textMain, fontFamily: "sans-serif" };
 
   useEffect(() => {
     fetch("https://api.open-meteo.com/v1/forecast?latitude=55.6761&longitude=12.5683&current_weather=true")
@@ -78,10 +82,9 @@ export default function App() {
     document.body.style.margin = "0";
   }, []);
 
-  // --- DATO & SÆSON LOGIK ---
   const getTodayDate = () => new Date().toISOString().split('T')[0];
   
-  const currentMonthStr = getTodayDate().substring(0, 7); // f.eks. "2026-04"
+  const currentMonthStr = getTodayDate().substring(0, 7);
   const getPrevMonthStr = () => {
     const d = new Date();
     d.setMonth(d.getMonth() - 1);
@@ -92,7 +95,6 @@ export default function App() {
   const monthNames = ["Januar", "Februar", "Marts", "April", "Maj", "Juni", "Juli", "August", "September", "Oktober", "November", "December"];
   const currentMonthName = monthNames[new Date().getMonth()];
 
-  // Udregner stats for en specifik måned
   const getStatsForMonth = (history = [], monthPrefix) => {
     let gym = 0, cardioKm = 0, cardioRuns = 0;
     history.forEach(h => {
@@ -108,38 +110,30 @@ export default function App() {
     return { gym, cardioKm: parseFloat(cardioKm.toFixed(1)), totalActivities: gym + cardioRuns };
   };
 
-  // Finder vinderen af FORRIGE måned (Månedens Dude)
   const getLastMonthWinner = () => {
     if (!users.length) return null;
     let winner = null;
     let maxScore = 0;
     users.forEach(u => {
       const score = getStatsForMonth(u.history, prevMonthStr).totalActivities;
-      if (score > maxScore && score > 0) {
-        maxScore = score;
-        winner = u.id;
-      }
+      if (score > maxScore && score > 0) { maxScore = score; winner = u.id; }
     });
-    return winner; // Returnerer ID'et på vinderen
+    return winner; 
   };
 
   const lastMonthWinnerId = getLastMonthWinner();
 
-  // Finder ugens MVP (sidste 7 dage)
   const getMVP = () => {
     if (!users.length) return null;
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-    
     let mvp = null;
     let maxCount = -1;
-
     users.forEach(user => {
       const recentActivities = (user.history || []).filter(h => {
         const activityDate = new Date(typeof h === 'string' ? h : h.date);
         return activityDate >= sevenDaysAgo;
       }).length;
-
       if (recentActivities > maxCount && recentActivities > 0) {
         maxCount = recentActivities;
         mvp = { ...user, weeklyCount: recentActivities };
@@ -169,7 +163,7 @@ export default function App() {
       if (isRegistering) {
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
         await setDoc(doc(db, "users", userCredential.user.uid), {
-          name: name, workouts: 0, lastWorkoutDate: null, history: [], bio: "Klar til at dominere.", photoUrl: "", maxLifts: { bench: 0, squat: 0, deadlift: 0 }
+          name: name, workouts: 0, lastWorkoutDate: null, history: [], bio: "Klar til at dominere.", photoUrl: "", arc: "Vinter Arc ❄️", maxLifts: { bench: 0, squat: 0, deadlift: 0 }
         });
       } else { await signInWithEmailAndPassword(auth, email, password); }
     } catch (error) { setErrorMsg("Fejl: " + error.message); }
@@ -199,7 +193,6 @@ export default function App() {
     if (window.confirm(`Slet seneste log for ${user.name}?`)) {
       const lastEntry = user.history[user.history.length - 1];
       const isGym = lastEntry.type === "gym" || typeof lastEntry === 'string';
-      
       await updateDoc(doc(db, "users", user.id), {
         workouts: isGym ? increment(-1) : increment(0),
         history: arrayRemove(lastEntry)
@@ -236,17 +229,11 @@ export default function App() {
     setIsUploading(false);
   };
 
-  const MainWrapper = ({ children }) => (
-    <div style={{ minHeight: "100vh", backgroundColor: theme.bg, color: theme.textMain, fontFamily: "sans-serif" }}>
-      {children}
-    </div>
-  );
-
-  if (loading) return <MainWrapper><div style={{textAlign:"center", paddingTop:"100px", color:theme.accent}}><h2>Indlæser...</h2></div></MainWrapper>;
+  if (loading) return <div style={{...mainStyle, textAlign:"center", paddingTop:"100px", color:theme.accent}}><h2>Indlæser...</h2></div>;
 
   if (!currentUser) {
     return (
-      <MainWrapper>
+      <div style={mainStyle}>
         <div style={{ padding: "40px 20px", maxWidth: "400px", margin: "0 auto", textAlign: "center" }}>
           <div style={{ background: theme.card, borderRadius: "16px", padding: "30px", marginTop: "50px" }}>
             <h1 style={{ color: theme.accent, marginTop: 0 }}>MASSIVE DUDES</h1>
@@ -255,19 +242,20 @@ export default function App() {
               {isRegistering && <input type="text" placeholder="Navn" value={name} onChange={(e) => setName(e.target.value)} style={{ padding: "12px", background: theme.inputBg, color: "white", border: "none", borderRadius: "8px" }} />}
               <input type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} style={{ padding: "12px", background: theme.inputBg, color: "white", border: "none", borderRadius: "8px" }} />
               <input type="password" placeholder="Kodeord" value={password} onChange={(e) => setPassword(e.target.value)} style={{ padding: "12px", background: theme.inputBg, color: "white", border: "none", borderRadius: "8px" }} />
-              <button type="submit" style={{ padding: "12px", background: theme.accent, color: "#000", borderRadius: "8px", border: "none", fontWeight: "bold" }}>{isRegistering ? "Opret" : "Log Ind"}</button>
+              <button type="submit" style={{ padding: "12px", background: theme.accent, color: "#000", borderRadius: "8px", border: "none", fontWeight: "bold", cursor: "pointer" }}>{isRegistering ? "Opret" : "Log Ind"}</button>
             </form>
             <p onClick={() => setIsRegistering(!isRegistering)} style={{ color: theme.textSub, cursor: "pointer", marginTop: "15px" }}>{isRegistering ? "Log ind" : "Opret profil"}</p>
           </div>
         </div>
-      </MainWrapper>
+      </div>
     );
   }
 
+  const currentUserData = users.find(u => u.id === currentUser.uid) || {};
   const mvp = getMVP();
 
   return (
-    <MainWrapper>
+    <div style={mainStyle}>
       <div style={{ padding: "15px", maxWidth: "500px", margin: "0 auto" }}>
         
         {/* HEADER */}
@@ -288,7 +276,13 @@ export default function App() {
         {/* TABS */}
         <div style={{ display: "flex", gap: "5px", marginBottom: "20px", background: theme.card, padding: "5px", borderRadius: "10px" }}>
           {["leaderboard", "stats", "chat", "profile"].map(t => (
-            <button key={t} onClick={() => setActiveTab(t)} style={{ flex: 1, padding: "10px 0", borderRadius: "8px", border: "none", backgroundColor: activeTab === t ? theme.accent : "transparent", color: activeTab === t ? "#000" : theme.textSub, fontWeight: "bold", fontSize: "12px" }}>
+            <button key={t} onClick={() => { 
+                setActiveTab(t);
+                if (t === "profile") {
+                  setMyBio(currentUserData.bio || "");
+                  setMyArc(currentUserData.arc || "Vinter Arc ❄️");
+                }
+              }} style={{ flex: 1, padding: "10px 0", borderRadius: "8px", border: "none", backgroundColor: activeTab === t ? theme.accent : "transparent", color: activeTab === t ? "#000" : theme.textSub, fontWeight: "bold", fontSize: "12px", cursor: "pointer" }}>
               {t === "leaderboard" ? "Sæson" : t === "stats" ? "Stats" : t === "chat" ? "Trash Talk" : "Profil"}
             </button>
           ))}
@@ -322,7 +316,7 @@ export default function App() {
                         <div style={{ fontWeight: "bold", fontSize: "15px" }}>
                           {user.name} {isLastMonthWinner && <span title="Månedens Dude (Forrige Måned)">🏆</span>}
                         </div>
-                        <div style={{ fontSize: "11px", color: theme.accent }}>{streak} dag{streak === 1 ? "" : "e"} streak 🔥</div>
+                        <div style={{ fontSize: "11px", color: theme.accent }}>{user.arc || "Vinter Arc ❄️"} | {streak} streak 🔥</div>
                       </div>
                     </div>
                     
@@ -333,7 +327,7 @@ export default function App() {
                         <div style={{ fontSize: "11px", color: "#60a5fa" }}>{user.currentMonthStats.cardioKm} km 🏃‍♂️</div>
                       </div>
                       {isMe && (
-                        <button onClick={(e) => { e.stopPropagation(); setShowLogModal(true); }} style={{ padding: "8px 12px", borderRadius: "8px", background: theme.accent, color: "#000", border: "none", fontSize: "12px", fontWeight: "bold" }}>+ Log</button>
+                        <button onClick={(e) => { e.stopPropagation(); setShowLogModal(true); }} style={{ padding: "8px 12px", borderRadius: "8px", background: theme.accent, color: "#000", border: "none", fontSize: "12px", fontWeight: "bold", cursor: "pointer" }}>+ Log</button>
                       )}
                     </div>
                   </div>
@@ -417,7 +411,7 @@ export default function App() {
             </div>
             <form onSubmit={sendChatMessage} style={{ display: "flex", padding: "10px", gap: "5px" }}>
               <input value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder="Trash talk..." style={{ flex: 1, padding: "10px", borderRadius: "8px", background: theme.inputBg, color: "white", border: "none" }} />
-              <button type="submit" style={{ padding: "10px 15px", background: theme.accent, border: "none", borderRadius: "8px", fontWeight: "bold", color: "#000" }}>Send</button>
+              <button type="submit" style={{ padding: "10px 15px", background: theme.accent, border: "none", borderRadius: "8px", fontWeight: "bold", color: "#000", cursor: "pointer" }}>Send</button>
             </form>
           </div>
         )}
@@ -437,14 +431,27 @@ export default function App() {
         {/* PROFIL */}
         {activeTab === "profile" && (
           <div style={{ background: theme.card, padding: "20px", borderRadius: "12px" }}>
+            
+            <div style={{ marginBottom: "15px" }}>
+              <label style={{ display: "block", fontSize: "12px", color: theme.textSub, marginBottom: "5px" }}>Nuværende Arc</label>
+              <div style={{ display: "flex", gap: "10px" }}>
+                <button onClick={() => setMyArc("Vinter Arc ❄️")} style={{ flex: 1, padding: "10px", borderRadius: "8px", border: myArc === "Vinter Arc ❄️" ? `2px solid ${theme.accent}` : "2px solid transparent", background: theme.inputBg, color: "white", cursor: "pointer" }}>Vinter ❄️</button>
+                <button onClick={() => setMyArc("Sommer Arc ☀️")} style={{ flex: 1, padding: "10px", borderRadius: "8px", border: myArc === "Sommer Arc ☀️" ? `2px solid ${theme.accent}` : "2px solid transparent", background: theme.inputBg, color: "white", cursor: "pointer" }}>Sommer ☀️</button>
+              </div>
+            </div>
+
+            <label style={{ display: "block", fontSize: "12px", color: theme.textSub, marginBottom: "5px" }}>Din Bio</label>
             <textarea value={myBio} onChange={(e) => setMyBio(e.target.value)} style={{ width: "100%", height: "60px", background: theme.inputBg, color: "white", border: "none", borderRadius: "8px", padding: "10px", boxSizing: "border-box" }} />
-            <input type="file" onChange={handleImageUpload} style={{ marginTop: "10px" }} />
-            <button onClick={async () => { await updateDoc(doc(db, "users", currentUser.uid), { bio: myBio }); alert("Gemt!"); }} style={{ width: "100%", padding: "12px", background: theme.accent, color: "#000", border: "none", borderRadius: "8px", marginTop: "15px", fontWeight: "bold", cursor: "pointer" }}>Gem Profil</button>
+            
+            <label style={{ display: "block", fontSize: "12px", color: theme.textSub, marginTop: "15px", marginBottom: "5px" }}>Profilbillede</label>
+            <input type="file" onChange={handleImageUpload} style={{ marginTop: "5px" }} />
+            
+            <button onClick={async () => { await updateDoc(doc(db, "users", currentUser.uid), { bio: myBio, arc: myArc }); alert("Gemt!"); }} style={{ width: "100%", padding: "12px", background: theme.accent, color: "#000", border: "none", borderRadius: "8px", marginTop: "25px", fontWeight: "bold", cursor: "pointer" }}>Gem Profil</button>
             <button onClick={() => signOut(auth)} style={{ width: "100%", background: "none", color: "#ef4444", border: "1px solid #ef4444", padding: "10px", borderRadius: "8px", marginTop: "10px", cursor: "pointer" }}>Log ud</button>
           </div>
         )}
 
       </div>
-    </MainWrapper>
+    </div>
   );
 }
