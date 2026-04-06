@@ -80,7 +80,6 @@ export default function App() {
 
   const calculateStreak = (history = []) => {
     if (!history.length) return 0;
-    // Vi filtrerer historikken for at få unikke datoer (uanset om det er gym eller cardio)
     const datesOnly = history.map(h => typeof h === 'string' ? h : h.date);
     const sortedDates = [...new Set(datesOnly)].sort((a, b) => new Date(b) - new Date(a));
     let streak = 0;
@@ -94,39 +93,51 @@ export default function App() {
     return streak;
   };
 
+  // Beregner alle km lagt sammen fra historikken
+  const calculateTotalCardio = (history = []) => {
+    const total = history.reduce((sum, entry) => {
+      if (typeof entry === 'object' && entry.type === "cardio" && entry.value) {
+        return sum + Number(entry.value);
+      }
+      return sum;
+    }, 0);
+    return total > 0 ? parseFloat(total.toFixed(1)) : 0;
+  };
+
   const handleAuth = async (e) => {
     e.preventDefault();
     try {
       if (isRegistering) {
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
         await setDoc(doc(db, "users", userCredential.user.uid), {
-          name: name, workouts: 0, lastWorkoutDate: null, history: [], bio: "Klar til gains.", photoUrl: "", maxLifts: { bench: 0, squat: 0, deadlift: 0 }
+          name: name, workouts: 0, lastWorkoutDate: null, history: [], bio: "Klar til at dominere.", photoUrl: "", maxLifts: { bench: 0, squat: 0, deadlift: 0 }, cardioRecords: { longestRun: 0, fastest5k: "-" }
         });
       } else { await signInWithEmailAndPassword(auth, email, password); }
     } catch (error) { setErrorMsg("Fejl: " + error.message); }
   };
 
-  // NY LOG FUNKTION
   const logActivity = async (type) => {
     const today = getTodayDate();
-    const userData = users.find(u => u.id === currentUser.uid);
-    if (userData.lastWorkoutDate === today) return alert("Du har allerede tjekket ind i dag! ⏳");
-
     let title = "";
     let distance = "";
 
     if (type === "gym") {
       title = prompt("Hvad har du trænet? (f.eks. Bryst & Triceps)");
+      if (title === null) return; // Annulleret
     } else {
-      distance = prompt("Hvor mange kilometer har du løbet?");
-      title = prompt("Beskrivelse (valgfri - f.eks. Roligt løb)");
+      distance = prompt("Hvor mange kilometer? (Skriv tal, f.eks. 5 eller 5.5)");
+      if (distance === null) return; // Annulleret
+      title = prompt("Beskrivelse (f.eks. Morgenløb, Intervaller)");
     }
+
+    // Erstatter komma med punktum, så systemet forstår kommatal
+    const parsedDistance = distance ? Number(distance.replace(',', '.')) : null;
 
     const activityObj = {
       date: today,
       type: type,
       title: title || (type === "gym" ? "Styrketræning" : "Cardio"),
-      value: distance || null
+      value: parsedDistance
     };
 
     const updateData = {
@@ -143,15 +154,23 @@ export default function App() {
   };
 
   const undoWorkout = async (user) => {
-    if (window.confirm(`Slet seneste log for ${user.name}?`)) {
+    if (window.confirm(`Er du sikker på, du vil slette den absolut seneste aktivitet for ${user.name}?`)) {
       const lastEntry = user.history[user.history.length - 1];
       const isGym = lastEntry.type === "gym" || typeof lastEntry === 'string';
       
       await updateDoc(doc(db, "users", user.id), {
         workouts: isGym ? increment(-1) : increment(0),
-        lastWorkoutDate: null,
         history: arrayRemove(lastEntry)
       });
+    }
+  };
+
+  // Opdaterer både løft og løb
+  const updateRecord = async (id, category, field, currentVal, promptText) => {
+    const newVal = prompt(promptText, currentVal);
+    if (newVal !== null && newVal !== "") {
+      const isNum = !isNaN(newVal);
+      await updateDoc(doc(db, "users", id), { [`${category}.${field}`]: isNum ? Number(newVal) : newVal });
     }
   };
 
@@ -212,9 +231,9 @@ export default function App() {
       
       {/* TABS */}
       <div style={{ display: "flex", gap: "5px", marginBottom: "20px", background: theme.card, padding: "5px", borderRadius: "10px" }}>
-        {["leaderboard", "maxlifts", "chat", "profile"].map(t => (
+        {["leaderboard", "stats", "chat", "profile"].map(t => (
           <button key={t} onClick={() => setActiveTab(t)} style={{ flex: 1, padding: "10px 0", borderRadius: "8px", border: "none", backgroundColor: activeTab === t ? theme.accent : "transparent", color: activeTab === t ? "#000" : theme.textSub, fontWeight: "bold", fontSize: "12px" }}>
-            {t === "leaderboard" ? "Ranking" : t === "maxlifts" ? "Maks" : t === "chat" ? "Trash Talk" : "Profil"}
+            {t === "leaderboard" ? "Ranking" : t === "stats" ? "Stats" : t === "chat" ? "Trash Talk" : "Profil"}
           </button>
         ))}
       </div>
@@ -226,34 +245,48 @@ export default function App() {
             const isMe = currentUser.uid === user.id;
             const doneToday = user.lastWorkoutDate === getTodayDate();
             const streak = calculateStreak(user.history);
+            const totalKm = calculateTotalCardio(user.history);
+
             return (
               <div key={user.id} style={{ background: theme.card, marginBottom: "10px", borderRadius: "12px", border: isMe ? `1px solid ${theme.accent}` : "1px solid #333", overflow: "hidden" }}>
                 <div onClick={() => setExpandedUserId(expandedUserId === user.id ? null : user.id)} style={{ padding: "15px", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                    <img src={user.photoUrl} style={{ width: "40px", height: "40px", borderRadius: "50%", background: "#444" }} />
+                    <img src={user.photoUrl} alt="" style={{ width: "45px", height: "45px", borderRadius: "50%", background: "#444", border: `2px solid ${isMe ? theme.accent : "#333"}` }} />
                     <div>
-                      <div style={{ fontWeight: "bold" }}>{user.name}</div>
-                      <div style={{ fontSize: "12px", color: theme.accent }}>{streak} dag{streak === 1 ? "" : "e"} 🔥</div>
+                      <div style={{ fontWeight: "bold", fontSize: "16px" }}>{user.name}</div>
+                      <div style={{ fontSize: "12px", color: theme.accent }}>{streak} dag{streak === 1 ? "" : "e"} streak 🔥</div>
                     </div>
                   </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                    <span style={{ fontWeight: "bold" }}>{user.workouts} 🏋️</span>
-                    {isMe && !doneToday && (
-                      <button onClick={(e) => { e.stopPropagation(); setShowLogModal(true); }} style={{ padding: "6px 12px", borderRadius: "6px", background: theme.accent, border: "none", fontSize: "12px", fontWeight: "bold" }}>Log</button>
-                    )}
-                    {(isMe || isAdmin) && doneToday && (
-                      <button onClick={(e) => { e.stopPropagation(); undoWorkout(user); }} style={{ color: "#ef4444", border: "none", background: "none", fontSize: "11px" }}>Fortryd</button>
+                  <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                    
+                    {/* Både Styrke og Løb Stats vist på forsiden */}
+                    <div style={{ textAlign: "right" }}>
+                      <div style={{ fontWeight: "bold", fontSize: "16px" }}>{user.workouts} 🏋️</div>
+                      <div style={{ fontSize: "12px", color: "#60a5fa" }}>{totalKm} km 🏃‍♂️</div>
+                    </div>
+                    
+                    {isMe && (
+                      <button onClick={(e) => { e.stopPropagation(); setShowLogModal(true); }} style={{ padding: "8px 12px", borderRadius: "8px", background: theme.accent, border: "none", fontSize: "12px", fontWeight: "bold", color: "#000" }}>
+                        {doneToday ? "+ Log mere" : "+ Log"}
+                      </button>
                     )}
                   </div>
                 </div>
                 
+                {/* Udfoldet visning (Historik + Fortryd) */}
                 {expandedUserId === user.id && (
-                  <div style={{ padding: "10px 15px", background: "#151515", borderTop: "1px solid #333", fontSize: "13px" }}>
-                    <p style={{ color: theme.textSub, margin: "0 0 10px 0" }}>"{user.bio}"</p>
-                    <div style={{ fontWeight: "bold", color: theme.accent, marginBottom: "5px" }}>Seneste aktivitet:</div>
+                  <div style={{ padding: "15px", background: "#151515", borderTop: "1px solid #333", fontSize: "13px" }}>
+                    <p style={{ color: theme.textSub, margin: "0 0 10px 0", fontStyle: "italic" }}>"{user.bio}"</p>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "5px" }}>
+                      <span style={{ fontWeight: "bold", color: theme.accent }}>Seneste aktivitet:</span>
+                      {(isMe || isAdmin) && user.history.length > 0 && (
+                         <button onClick={() => undoWorkout(user)} style={{ color: "#ef4444", border: "none", background: "none", fontSize: "11px", cursor: "pointer" }}>Slet seneste log 💀</button>
+                      )}
+                    </div>
                     {[...user.history].reverse().slice(0, 5).map((h, i) => (
-                      <div key={i} style={{ marginBottom: "4px", padding: "5px", background: "#222", borderRadius: "4px" }}>
-                        {h.type === "gym" ? "🏋️ Styrke" : "🏃‍♂️ Cardio"}: {h.title} {h.value && `(${h.value} km)`} <span style={{fontSize:"10px", color:"#666"}}>- {h.date}</span>
+                      <div key={i} style={{ marginBottom: "5px", padding: "8px", background: theme.inputBg, borderRadius: "6px", display: "flex", justifyContent: "space-between" }}>
+                        <span>{h.type === "gym" ? "🏋️ " : "🏃‍♂️ "} {h.title} {h.value && `(${h.value} km)`}</span>
+                        <span style={{fontSize:"10px", color:theme.textSub}}>{h.date}</span>
                       </div>
                     ))}
                   </div>
@@ -270,14 +303,14 @@ export default function App() {
           <div style={{ flex: 1, overflowY: "auto", padding: "15px", display: "flex", flexDirection: "column", gap: "10px" }}>
             {messages.map(m => (
               <div key={m.id} style={{ alignSelf: m.userId === currentUser.uid ? "flex-end" : "flex-start", background: m.userId === currentUser.uid ? theme.accent : "#333", color: m.userId === currentUser.uid ? "#000" : "white", padding: "8px 12px", borderRadius: "10px", maxWidth: "80%" }}>
-                <div style={{ fontSize: "10px", opacity: 0.7 }}>{m.userName}</div>
+                <div style={{ fontSize: "10px", opacity: 0.7, fontWeight: "bold" }}>{m.userName}</div>
                 <div style={{ fontSize: "14px" }}>{m.text}</div>
               </div>
             ))}
           </div>
-          <form onSubmit={sendChatMessage} style={{ display: "flex", padding: "10px", gap: "5px" }}>
-            <input value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder="Trash talk..." style={{ flex: 1, padding: "10px", borderRadius: "8px", background: theme.inputBg, color: "white", border: "none" }} />
-            <button type="submit" style={{ padding: "10px 15px", background: theme.accent, border: "none", borderRadius: "8px", fontWeight: "bold" }}>Send</button>
+          <form onSubmit={sendChatMessage} style={{ display: "flex", padding: "10px", gap: "5px", borderTop: "1px solid #333" }}>
+            <input value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder="Skriv besked..." style={{ flex: 1, padding: "10px", borderRadius: "8px", background: theme.inputBg, color: "white", border: "none" }} />
+            <button type="submit" style={{ padding: "10px 15px", background: theme.accent, color: "#000", border: "none", borderRadius: "8px", fontWeight: "bold" }}>Send</button>
           </form>
         </div>
       )}
@@ -285,33 +318,69 @@ export default function App() {
       {/* MODAL TIL VALG AF TRÆNING */}
       {showLogModal && (
         <div style={{ position: "fixed", top: 0, left: 0, width: "100%", height: "100%", background: "rgba(0,0,0,0.8)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 100 }}>
-          <div style={{ background: theme.card, padding: "25px", borderRadius: "16px", width: "80%", maxWidth: "300px", textAlign: "center" }}>
-            <h3 style={{ marginTop: 0 }}>Hvad har du lavet?</h3>
-            <button onClick={() => logActivity("gym")} style={{ width: "100%", padding: "15px", background: theme.accent, border: "none", borderRadius: "8px", fontWeight: "bold", marginBottom: "10px" }}>🏋️ Styrketræning</button>
-            <button onClick={() => logActivity("cardio")} style={{ width: "100%", padding: "15px", background: "#3b82f6", color: "white", border: "none", borderRadius: "8px", fontWeight: "bold", marginBottom: "15px" }}>🏃‍♂️ Cardio / Løb</button>
-            <button onClick={() => setShowLogModal(false)} style={{ color: theme.textSub, background: "none", border: "none" }}>Annuller</button>
+          <div style={{ background: theme.card, padding: "25px", borderRadius: "16px", width: "80%", maxWidth: "300px", textAlign: "center", border: `1px solid ${theme.border}` }}>
+            <h3 style={{ marginTop: 0, color: "white" }}>Hvad har du lavet?</h3>
+            <button onClick={() => logActivity("gym")} style={{ width: "100%", padding: "15px", background: theme.accent, color: "#000", border: "none", borderRadius: "8px", fontWeight: "bold", marginBottom: "10px", fontSize: "16px", cursor: "pointer" }}>🏋️ Styrketræning</button>
+            <button onClick={() => logActivity("cardio")} style={{ width: "100%", padding: "15px", background: "#3b82f6", color: "white", border: "none", borderRadius: "8px", fontWeight: "bold", marginBottom: "15px", fontSize: "16px", cursor: "pointer" }}>🏃‍♂️ Cardio / Løb</button>
+            <button onClick={() => setShowLogModal(false)} style={{ color: theme.textSub, background: "none", border: "none", fontSize: "14px", cursor: "pointer" }}>Annuller</button>
           </div>
         </div>
       )}
 
-      {/* MAKS LØFT & PROFIL */}
-      {activeTab === "maxlifts" && (
+      {/* STATS & REKORDER */}
+      {activeTab === "stats" && (
         <div>
-          {users.map(user => (
-            <div key={user.id} style={{ background: theme.card, padding: "15px", marginBottom: "10px", borderRadius: "12px" }}>
-              <h4 style={{ margin: "0 0 10px 0" }}>{user.name}</h4>
-              <div style={{ fontSize: "14px", color: theme.accent }}>Bænk: {user.maxLifts.bench} kg | Squat: {user.maxLifts.squat} kg | Død: {user.maxLifts.deadlift} kg</div>
-            </div>
-          ))}
+          {users.map(user => {
+            const canEdit = currentUser.uid === user.id || isAdmin;
+            return (
+              <div key={user.id} style={{ background: theme.card, padding: "20px", marginBottom: "15px", borderRadius: "12px", border: `1px solid ${theme.border}` }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "15px" }}>
+                  <h3 style={{ margin: 0, color: "white" }}>{user.name}</h3>
+                  {canEdit && <span style={{ fontSize: "11px", color: theme.textSub }}>Tryk for at redigere ✏️</span>}
+                </div>
+                
+                {/* STYRKE */}
+                <h4 style={{ color: theme.accent, margin: "0 0 10px 0", fontSize: "14px", textTransform: "uppercase" }}>🏋️ Styrke (Maks)</h4>
+                <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "20px" }}>
+                  <div onClick={() => canEdit && updateRecord(user.id, "maxLifts", "bench", user.maxLifts?.bench, "Nyt Bænkpres maks (kg):")} style={{ display: "flex", justifyContent: "space-between", borderBottom: `1px solid ${theme.border}`, paddingBottom: "5px", cursor: canEdit ? "pointer" : "default" }}>
+                    <span style={{ color: theme.textSub }}>Bænkpres:</span> <strong>{user.maxLifts?.bench || 0} kg</strong>
+                  </div>
+                  <div onClick={() => canEdit && updateRecord(user.id, "maxLifts", "squat", user.maxLifts?.squat, "Nyt Squat maks (kg):")} style={{ display: "flex", justifyContent: "space-between", borderBottom: `1px solid ${theme.border}`, paddingBottom: "5px", cursor: canEdit ? "pointer" : "default" }}>
+                    <span style={{ color: theme.textSub }}>Squat:</span> <strong>{user.maxLifts?.squat || 0} kg</strong>
+                  </div>
+                  <div onClick={() => canEdit && updateRecord(user.id, "maxLifts", "deadlift", user.maxLifts?.deadlift, "Nyt Dødløft maks (kg):")} style={{ display: "flex", justifyContent: "space-between", cursor: canEdit ? "pointer" : "default" }}>
+                    <span style={{ color: theme.textSub }}>Dødløft:</span> <strong>{user.maxLifts?.deadlift || 0} kg</strong>
+                  </div>
+                </div>
+
+                {/* CARDIO */}
+                <h4 style={{ color: "#60a5fa", margin: "0 0 10px 0", fontSize: "14px", textTransform: "uppercase" }}>🏃‍♂️ Løb (Rekorder)</h4>
+                <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", borderBottom: `1px solid ${theme.border}`, paddingBottom: "5px" }}>
+                    <span style={{ color: theme.textSub }}>Total løbet:</span> <strong>{calculateTotalCardio(user.history)} km</strong>
+                  </div>
+                  <div onClick={() => canEdit && updateRecord(user.id, "cardioRecords", "longestRun", user.cardioRecords?.longestRun, "Længste løbetur (km):")} style={{ display: "flex", justifyContent: "space-between", borderBottom: `1px solid ${theme.border}`, paddingBottom: "5px", cursor: canEdit ? "pointer" : "default" }}>
+                    <span style={{ color: theme.textSub }}>Længste tur:</span> <strong>{user.cardioRecords?.longestRun || 0} km</strong>
+                  </div>
+                  <div onClick={() => canEdit && updateRecord(user.id, "cardioRecords", "fastest5k", user.cardioRecords?.fastest5k, "Hurtigste 5 km (f.eks. '24:30'):")} style={{ display: "flex", justifyContent: "space-between", cursor: canEdit ? "pointer" : "default" }}>
+                    <span style={{ color: theme.textSub }}>Hurtigste 5 km:</span> <strong>{user.cardioRecords?.fastest5k || "-"}</strong>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
 
+      {/* MIN PROFIL */}
       {activeTab === "profile" && (
         <div style={{ background: theme.card, padding: "20px", borderRadius: "12px" }}>
-          <textarea value={myBio} onChange={(e) => setMyBio(e.target.value)} style={{ width: "100%", height: "60px", background: theme.inputBg, color: "white", border: "none", borderRadius: "8px", padding: "10px" }} />
-          <input type="file" onChange={handleImageUpload} style={{ marginTop: "10px" }} />
-          <button onClick={async () => { await updateDoc(doc(db, "users", currentUser.uid), { bio: myBio }); alert("Gemt!"); }} style={{ width: "100%", padding: "12px", background: theme.accent, border: "none", borderRadius: "8px", marginTop: "15px", fontWeight: "bold" }}>Gem Profil</button>
-          <button onClick={() => signOut(auth)} style={{ width: "100%", background: "none", color: "#ef4444", border: "1px solid #ef4444", padding: "10px", borderRadius: "8px", marginTop: "10px" }}>Log ud</button>
+          <h3 style={{ margin: "0 0 15px 0" }}>Din Profil</h3>
+          <textarea value={myBio} onChange={(e) => setMyBio(e.target.value)} style={{ width: "100%", height: "60px", background: theme.inputBg, color: "white", border: "none", borderRadius: "8px", padding: "10px", boxSizing: "border-box" }} placeholder="Lidt om dig..." />
+          <input type="file" onChange={handleImageUpload} style={{ marginTop: "15px", display: "block" }} />
+          {isUploading && <span style={{ color: theme.accent, fontSize: "12px" }}>Uploader...</span>}
+          <button onClick={async () => { await updateDoc(doc(db, "users", currentUser.uid), { bio: myBio }); alert("Profil opdateret!"); }} style={{ width: "100%", padding: "12px", background: theme.accent, color: "#000", border: "none", borderRadius: "8px", marginTop: "20px", fontWeight: "bold", cursor: "pointer" }}>Gem Profil</button>
+          <button onClick={() => signOut(auth)} style={{ width: "100%", background: "none", color: "#ef4444", border: "1px solid #ef4444", padding: "12px", borderRadius: "8px", marginTop: "10px", cursor: "pointer", fontWeight: "bold" }}>Log ud</button>
         </div>
       )}
 
