@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { initializeApp } from "firebase/app";
-import { getFirestore, collection, onSnapshot, doc, setDoc, updateDoc, increment, arrayUnion } from "firebase/firestore";
+import { getFirestore, collection, onSnapshot, doc, setDoc, updateDoc, increment, arrayUnion, arrayRemove } from "firebase/firestore";
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "firebase/auth";
 import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
 
@@ -17,14 +17,13 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const auth = getAuth(app);
-const storage = getStorage(app); // Starter harddisken til billeder
+const storage = getStorage(app); 
 
 export default function App() {
   const [activeTab, setActiveTab] = useState("leaderboard");
   const [users, setUsers] = useState([]);
   const [expandedUserId, setExpandedUserId] = useState(null);
   
-  // Login & Loading State
   const [currentUser, setCurrentUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [email, setEmail] = useState("");
@@ -33,10 +32,9 @@ export default function App() {
   const [isRegistering, setIsRegistering] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
 
-  // Profil Redigering State
   const [myBio, setMyBio] = useState("");
   const [myPhoto, setMyPhoto] = useState("");
-  const [isUploading, setIsUploading] = useState(false); // Holder styr på om billedet loader
+  const [isUploading, setIsUploading] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
@@ -66,7 +64,7 @@ export default function App() {
           workouts: 0,
           lastWorkoutDate: null,
           history: [],
-          bio: "Just a massive dude.",
+          bio: "KLAR TIL AT ØDELÆGGE JERN. 🩸",
           photoUrl: "", 
           maxLifts: { bench: 0, squat: 0, deadlift: 0 }
         });
@@ -74,14 +72,14 @@ export default function App() {
         await signInWithEmailAndPassword(auth, email, password);
       }
     } catch (error) {
-      setErrorMsg("Fejl: " + error.message);
+      setErrorMsg("FUCK UP: " + error.message);
     }
   };
 
   const logWorkout = async (user) => {
     const today = getTodayDate();
     if (user.lastWorkoutDate === today) {
-      alert("Du har allerede tjekket ind i dag, maskine!");
+      alert("DU HAR ALLEREDE SMADRET JERNET I DAG! RO PÅ, DYR! 🦍");
       return;
     }
     await updateDoc(doc(db, "users", user.id), {
@@ -91,8 +89,20 @@ export default function App() {
     });
   };
 
+  // NY HELL YEAH FORTRYD-FUNKTION
+  const undoWorkout = async (user) => {
+    const today = getTodayDate();
+    if (window.confirm("TRYKKEDE DU FORKERT MED DINE TYKKE PØLSEFINGRE? Vil du slette dagens træning? 💀")) {
+      await updateDoc(doc(db, "users", user.id), {
+        workouts: increment(-1),
+        lastWorkoutDate: null,
+        history: arrayRemove(today)
+      });
+    }
+  };
+
   const updateMaxLift = async (id, liftType, currentWeight) => {
-    const newWeight = prompt(`Nyt maks i ${liftType} (kg):`, currentWeight);
+    const newWeight = prompt(`NYT MAKS I ${liftType.toUpperCase()} (KG)? INGEN LØGN, KUN RÅSTYRKE:`, currentWeight);
     if (newWeight && !isNaN(newWeight)) {
       await updateDoc(doc(db, "users", id), { [`maxLifts.${liftType}`]: Number(newWeight) });
     }
@@ -104,72 +114,68 @@ export default function App() {
       bio: myBio,
       photoUrl: myPhoto
     });
-    alert("Profil opdateret! 💪");
+    alert("PROFIL OPDATERET! HELL YEAH! 💥");
   };
 
-  // --- UPLOAD BILLEDE FUNKTION ---
   const handleImageUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
     setIsUploading(true);
-    // Skab en reference (en "mappe" i Firebase) med dit unikke ID
     const imageRef = ref(storage, `profile_pictures/${currentUser.uid}`);
     
     try {
-      // Upload filen
       await uploadBytes(imageRef, file);
-      // Få det nye link til billedet
       const url = await getDownloadURL(imageRef);
       setMyPhoto(url);
-      
-      // Gem linket direkte i databasen med det samme
       await updateDoc(doc(db, "users", currentUser.uid), { photoUrl: url });
-      alert("Billede uploadet! 📸");
+      alert("FLEX UPLOADET! 📸🦍");
     } catch (error) {
-      alert("Fejl ved upload. Husk at tænde for Firebase Storage! Fejl: " + error.message);
+      alert("NOGET GIK GALT! " + error.message);
     }
     setIsUploading(false);
   };
 
-  // --- FARVE TEMA ---
+  // --- HELL YEAH CORE THEME ---
   const theme = {
-    bg: "#111111",
-    card: "#222222",
-    accent: "#FF5722",
+    bg: "#0A0A0A", // Kulsort
+    card: "#161616", // Mørkegrå
+    accent: "#E50914", // Blodrød
+    neon: "#FF3333", // Glødende rød
     textMain: "#FFFFFF",
-    textSub: "#AAAAAA",
-    inputBg: "#333333"
+    textSub: "#888888",
+    inputBg: "#222222"
   };
 
   useEffect(() => {
     document.body.style.backgroundColor = theme.bg;
     document.body.style.color = theme.textMain;
     document.body.style.margin = "0";
+    document.body.style.textTransform = "uppercase"; // ALT ER MED STORE BOGSTAVER FORDI VI RÅBER
   }, []);
 
   if (loading) {
     return (
-      <div style={{ textAlign: "center", marginTop: "100px", fontFamily: "sans-serif", color: theme.accent }}>
-        <h2>Varmer op... 🏋️‍♂️</h2>
+      <div style={{ textAlign: "center", marginTop: "100px", fontFamily: "impact, sans-serif", color: theme.accent, letterSpacing: "2px" }}>
+        <h2 style={{ fontSize: "30px" }}>VARMER OP TIL KRIG... ☢️</h2>
       </div>
     );
   }
 
   if (!currentUser) {
     return (
-      <div style={{ fontFamily: "sans-serif", padding: "30px", maxWidth: "400px", margin: "50px auto", background: theme.card, borderRadius: "12px", textAlign: "center", border: `1px solid ${theme.accent}` }}>
-        <h1 style={{ color: theme.accent, textTransform: "uppercase", letterSpacing: "2px" }}>MASSIVE DUDES</h1>
-        <h2 style={{ color: theme.textMain }}>{isRegistering ? "Bliv en Dude" : "Log Ind"}</h2>
-        {errorMsg && <p style={{ color: "red" }}>{errorMsg}</p>}
+      <div style={{ fontFamily: "impact, sans-serif", padding: "30px", maxWidth: "400px", margin: "50px auto", background: theme.card, borderRadius: "0px", border: `3px solid ${theme.accent}`, textAlign: "center", boxShadow: `0 0 20px ${theme.accent}40` }}>
+        <h1 style={{ color: theme.accent, fontSize: "40px", margin: "0 0 10px 0", textShadow: `0 0 10px ${theme.neon}` }}>MASSIVE DUDES</h1>
+        <h2 style={{ color: theme.textMain, fontSize: "20px" }}>{isRegistering ? "BLIV EN DEL AF KULTEN" : "TRÆD IND PÅ SLAGMARKEN"}</h2>
+        {errorMsg && <p style={{ color: theme.neon }}>{errorMsg}</p>}
         <form onSubmit={handleAuth} style={{ display: "flex", flexDirection: "column", gap: "15px", marginTop: "20px" }}>
-          {isRegistering && <input type="text" placeholder="Dit Navn" value={name} onChange={(e) => setName(e.target.value)} required style={{ padding: "12px", borderRadius: "6px", border: "none", background: theme.inputBg, color: theme.textMain }} />}
-          <input type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} required style={{ padding: "12px", borderRadius: "6px", border: "none", background: theme.inputBg, color: theme.textMain }} />
-          <input type="password" placeholder="Kodeord" value={password} onChange={(e) => setPassword(e.target.value)} required style={{ padding: "12px", borderRadius: "6px", border: "none", background: theme.inputBg, color: theme.textMain }} />
-          <button type="submit" style={{ padding: "14px", background: theme.accent, color: "white", border: "none", borderRadius: "6px", fontWeight: "bold", fontSize: "16px", cursor: "pointer", textTransform: "uppercase" }}>{isRegistering ? "Opret" : "Log Ind"}</button>
+          {isRegistering && <input type="text" placeholder="DIT KAMPNAVN" value={name} onChange={(e) => setName(e.target.value)} required style={{ padding: "15px", border: `1px solid ${theme.accent}`, background: theme.inputBg, color: theme.textMain, fontWeight: "bold" }} />}
+          <input type="email" placeholder="EMAIL" value={email} onChange={(e) => setEmail(e.target.value)} required style={{ padding: "15px", border: `1px solid ${theme.accent}`, background: theme.inputBg, color: theme.textMain, fontWeight: "bold" }} />
+          <input type="password" placeholder="KODEORD" value={password} onChange={(e) => setPassword(e.target.value)} required style={{ padding: "15px", border: `1px solid ${theme.accent}`, background: theme.inputBg, color: theme.textMain, fontWeight: "bold" }} />
+          <button type="submit" style={{ padding: "15px", background: theme.accent, color: "white", border: "none", fontWeight: "bold", fontSize: "20px", cursor: "pointer", letterSpacing: "2px" }}>{isRegistering ? "OPRET MIG 🩸" : "LOG IND 💥"}</button>
         </form>
-        <p onClick={() => setIsRegistering(!isRegistering)} style={{ color: theme.textSub, cursor: "pointer", marginTop: "20px", fontSize: "14px" }}>
-          {isRegistering ? "Har du en konto? Log ind" : "Ny dude? Opret profil"}
+        <p onClick={() => setIsRegistering(!isRegistering)} style={{ color: theme.textSub, cursor: "pointer", marginTop: "20px", fontSize: "14px", fontWeight: "bold" }}>
+          {isRegistering ? "ALLEREDE MEDLEM? LOG IND HER" : "IKKE MED I KULTEN? OPRET DIG"}
         </p>
       </div>
     );
@@ -178,58 +184,63 @@ export default function App() {
   const currentUserData = users.find(u => u.id === currentUser.uid) || {};
 
   return (
-    <div style={{ fontFamily: "sans-serif", padding: "20px", maxWidth: "500px", margin: "0 auto", color: theme.textMain }}>
+    <div style={{ fontFamily: "impact, sans-serif", padding: "20px", maxWidth: "500px", margin: "0 auto", color: theme.textMain }}>
       
       {/* HEADER */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `2px solid ${theme.accent}`, paddingBottom: "10px", marginBottom: "20px" }}>
-        <h2 style={{ color: theme.accent, margin: 0, fontSize: "20px", letterSpacing: "1px" }}>MASSIVE DUDES 🦾</h2>
-        <button onClick={() => signOut(auth)} style={{ padding: "8px 12px", background: theme.card, color: theme.textSub, border: "1px solid #444", borderRadius: "6px", cursor: "pointer" }}>Log ud</button>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `4px solid ${theme.accent}`, paddingBottom: "10px", marginBottom: "20px" }}>
+        <h2 style={{ color: theme.accent, margin: 0, fontSize: "28px", textShadow: `0 0 8px ${theme.neon}` }}>MASSIVE DUDES ☢️</h2>
+        <button onClick={() => signOut(auth)} style={{ padding: "10px 15px", background: theme.bg, color: theme.accent, border: `2px solid ${theme.accent}`, fontWeight: "bold", cursor: "pointer" }}>FLYGT (LOG UD)</button>
       </div>
       
       {/* MENU NAVIGATION */}
-      <div style={{ display: "flex", gap: "5px", marginBottom: "20px" }}>
-        <button onClick={() => setActiveTab("leaderboard")} style={{ flex: 1, padding: "12px 5px", borderRadius: "6px", border: "none", backgroundColor: activeTab === "leaderboard" ? theme.accent : theme.card, color: activeTab === "leaderboard" ? "white" : theme.textSub, fontWeight: "bold" }}>Ranking</button>
-        <button onClick={() => setActiveTab("maxlifts")} style={{ flex: 1, padding: "12px 5px", borderRadius: "6px", border: "none", backgroundColor: activeTab === "maxlifts" ? theme.accent : theme.card, color: activeTab === "maxlifts" ? "white" : theme.textSub, fontWeight: "bold" }}>Maks Løft</button>
-        <button onClick={() => { setActiveTab("profile"); setMyBio(currentUserData.bio || ""); setMyPhoto(currentUserData.photoUrl || ""); }} style={{ flex: 1, padding: "12px 5px", borderRadius: "6px", border: "none", backgroundColor: activeTab === "profile" ? theme.accent : theme.card, color: activeTab === "profile" ? "white" : theme.textSub, fontWeight: "bold" }}>Min Profil</button>
+      <div style={{ display: "flex", gap: "5px", marginBottom: "20px", fontFamily: "sans-serif" }}>
+        <button onClick={() => setActiveTab("leaderboard")} style={{ flex: 1, padding: "12px 5px", border: "none", backgroundColor: activeTab === "leaderboard" ? theme.accent : theme.card, color: activeTab === "leaderboard" ? "white" : theme.textSub, fontWeight: "bold", fontSize: "16px" }}>DOMINANS</button>
+        <button onClick={() => setActiveTab("maxlifts")} style={{ flex: 1, padding: "12px 5px", border: "none", backgroundColor: activeTab === "maxlifts" ? theme.accent : theme.card, color: activeTab === "maxlifts" ? "white" : theme.textSub, fontWeight: "bold", fontSize: "16px" }}>RÅSTYRKE</button>
+        <button onClick={() => { setActiveTab("profile"); setMyBio(currentUserData.bio || ""); setMyPhoto(currentUserData.photoUrl || ""); }} style={{ flex: 1, padding: "12px 5px", border: "none", backgroundColor: activeTab === "profile" ? theme.accent : theme.card, color: activeTab === "profile" ? "white" : theme.textSub, fontWeight: "bold", fontSize: "16px" }}>EGO</button>
       </div>
 
       {/* 1. LEADERBOARD FANE */}
       {activeTab === "leaderboard" && (
-        <div>
+        <div style={{ fontFamily: "sans-serif" }}>
           {users.sort((a, b) => b.workouts - a.workouts).map(user => {
             const isMe = currentUser.uid === user.id;
             const doneToday = user.lastWorkoutDate === getTodayDate();
             const isExpanded = expandedUserId === user.id;
 
             return (
-              <div key={user.id} style={{ background: theme.card, marginBottom: "12px", borderRadius: "8px", border: isMe ? `1px solid ${theme.accent}` : "1px solid #333", overflow: "hidden" }}>
-                <div onClick={() => setExpandedUserId(isExpanded ? null : user.id)} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "15px", cursor: "pointer" }}>
+              <div key={user.id} style={{ background: theme.card, marginBottom: "12px", border: isMe ? `2px solid ${theme.accent}` : "2px solid #222", overflow: "hidden" }}>
+                <div onClick={() => setExpandedUserId(isExpanded ? null : user.id)} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "15px", cursor: "pointer", background: isMe ? "rgba(229, 9, 20, 0.1)" : theme.card }}>
                   <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                    <div style={{ width: "40px", height: "40px", borderRadius: "50%", background: theme.inputBg, backgroundImage: `url(${user.photoUrl})`, backgroundSize: "cover", backgroundPosition: "center", border: `2px solid ${isMe ? theme.accent : "#555"}` }} />
-                    <span style={{ fontSize: "18px", fontWeight: "bold" }}>{user.name}</span>
+                    <div style={{ width: "45px", height: "45px", background: theme.inputBg, backgroundImage: `url(${user.photoUrl})`, backgroundSize: "cover", backgroundPosition: "center", border: `2px solid ${isMe ? theme.accent : "#444"}`, borderRadius: "0" }} />
+                    <span style={{ fontSize: "20px", fontWeight: "900", color: isMe ? theme.accent : "white", fontFamily: "impact" }}>{user.name}</span>
                   </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: "15px" }}>
-                    <span style={{ fontSize: "18px", color: theme.accent, fontWeight: "bold" }}>{user.workouts} 🏋️</span>
-                    {isMe && (
-                      <button onClick={(e) => { e.stopPropagation(); logWorkout(user); }} disabled={doneToday} style={{ padding: "8px 12px", background: doneToday ? theme.inputBg : theme.accent, color: doneToday ? theme.textSub : "white", border: "none", borderRadius: "6px", fontWeight: "bold" }}>
-                        {doneToday ? "Færdig" : "+ Tjek ind"}
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                    <span style={{ fontSize: "24px", color: theme.accent, fontWeight: "bold", fontFamily: "impact" }}>{user.workouts} 🩸</span>
+                    {isMe && !doneToday && (
+                      <button onClick={(e) => { e.stopPropagation(); logWorkout(user); }} style={{ padding: "10px 15px", background: theme.accent, color: "white", border: "none", fontWeight: "bold", cursor: "pointer", boxShadow: `0 0 10px ${theme.accent}` }}>
+                        FUCKING TJEK IND
+                      </button>
+                    )}
+                    {isMe && doneToday && (
+                      <button onClick={(e) => { e.stopPropagation(); undoWorkout(user); }} style={{ padding: "10px", background: "transparent", color: theme.textSub, border: "1px solid #555", fontWeight: "bold", cursor: "pointer" }} title="Slet Dagens Træning">
+                        💀 UNDO
                       </button>
                     )}
                   </div>
                 </div>
 
                 {isExpanded && (
-                  <div style={{ padding: "15px", borderTop: "1px solid #333", background: "#1a1a1a" }}>
-                    <p style={{ fontStyle: "italic", color: theme.textSub, marginTop: 0 }}>"{user.bio || 'Ingen bio tilføjet endnu.'}"</p>
-                    <h4 style={{ color: theme.accent, marginBottom: "5px" }}>Træningshistorik:</h4>
+                  <div style={{ padding: "15px", borderTop: "2px solid #222", background: "#0f0f0f" }}>
+                    <p style={{ fontStyle: "italic", color: theme.textSub, marginTop: 0, fontWeight: "bold" }}>"{user.bio || 'INGEN BIO. BARE GRIND.'}"</p>
+                    <h4 style={{ color: theme.accent, marginBottom: "10px", fontFamily: "impact", fontSize: "18px" }}>KAMP HISTORIK:</h4>
                     {user.history && user.history.length > 0 ? (
                       <div style={{ display: "flex", flexWrap: "wrap", gap: "5px" }}>
                         {[...user.history].reverse().slice(0, 10).map((date, index) => (
-                          <span key={index} style={{ fontSize: "12px", background: theme.inputBg, padding: "4px 8px", borderRadius: "4px", color: theme.textSub }}>{date}</span>
+                          <span key={index} style={{ fontSize: "12px", background: theme.bg, border: `1px solid ${theme.accent}`, padding: "5px 8px", color: theme.neon, fontWeight: "bold" }}>{date}</span>
                         ))}
                       </div>
                     ) : (
-                      <p style={{ fontSize: "13px", color: theme.textSub }}>Har ikke logget nogle træninger endnu.</p>
+                      <p style={{ fontSize: "13px", color: theme.textSub, fontWeight: "bold" }}>HAR ALDRIG RØRT ET VÆGTSTANG.</p>
                     )}
                   </div>
                 )}
@@ -241,21 +252,21 @@ export default function App() {
 
       {/* 2. MAKS LØFT FANE */}
       {activeTab === "maxlifts" && (
-        <div>
+        <div style={{ fontFamily: "sans-serif" }}>
           {users.map(user => {
              const isMe = currentUser.uid === user.id;
              return (
-              <div key={user.id} style={{ background: theme.card, padding: "15px", marginBottom: "12px", borderRadius: "8px", border: isMe ? `1px solid ${theme.accent}` : "1px solid #333" }}>
-                <h3 style={{ margin: "0 0 15px 0", color: isMe ? theme.accent : "white" }}>{user.name}</h3>
-                <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                  <div onClick={() => isMe && updateMaxLift(user.id, 'bench', user.maxLifts.bench)} style={{ display: "flex", justifyContent: "space-between", paddingBottom: "5px", borderBottom: "1px solid #333", cursor: isMe ? "pointer" : "default" }}>
-                    <span>Bænkpres:</span> <strong style={{ color: theme.accent }}>{user.maxLifts?.bench || 0} kg {isMe && "✏️"}</strong>
+              <div key={user.id} style={{ background: theme.card, padding: "20px", marginBottom: "15px", border: isMe ? `2px solid ${theme.accent}` : "2px solid #222" }}>
+                <h3 style={{ margin: "0 0 15px 0", color: isMe ? theme.accent : "white", fontFamily: "impact", fontSize: "24px" }}>{user.name}</h3>
+                <div style={{ display: "flex", flexDirection: "column", gap: "10px", fontWeight: "bold", fontSize: "18px" }}>
+                  <div onClick={() => isMe && updateMaxLift(user.id, 'bench', user.maxLifts.bench)} style={{ display: "flex", justifyContent: "space-between", paddingBottom: "10px", borderBottom: "1px solid #333", cursor: isMe ? "pointer" : "default" }}>
+                    <span>BÆNKPRES:</span> <strong style={{ color: theme.neon }}>{user.maxLifts?.bench || 0} KG {isMe && "🛠️"}</strong>
                   </div>
-                  <div onClick={() => isMe && updateMaxLift(user.id, 'squat', user.maxLifts.squat)} style={{ display: "flex", justifyContent: "space-between", paddingBottom: "5px", borderBottom: "1px solid #333", cursor: isMe ? "pointer" : "default" }}>
-                    <span>Squat:</span> <strong style={{ color: theme.accent }}>{user.maxLifts?.squat || 0} kg {isMe && "✏️"}</strong>
+                  <div onClick={() => isMe && updateMaxLift(user.id, 'squat', user.maxLifts.squat)} style={{ display: "flex", justifyContent: "space-between", paddingBottom: "10px", borderBottom: "1px solid #333", cursor: isMe ? "pointer" : "default" }}>
+                    <span>SQUAT:</span> <strong style={{ color: theme.neon }}>{user.maxLifts?.squat || 0} KG {isMe && "🛠️"}</strong>
                   </div>
                   <div onClick={() => isMe && updateMaxLift(user.id, 'deadlift', user.maxLifts.deadlift)} style={{ display: "flex", justifyContent: "space-between", cursor: isMe ? "pointer" : "default" }}>
-                    <span>Dødløft:</span> <strong style={{ color: theme.accent }}>{user.maxLifts?.deadlift || 0} kg {isMe && "✏️"}</strong>
+                    <span>DØDLØFT:</span> <strong style={{ color: theme.neon }}>{user.maxLifts?.deadlift || 0} KG {isMe && "🛠️"}</strong>
                   </div>
                 </div>
               </div>
@@ -266,37 +277,35 @@ export default function App() {
 
       {/* 3. MIN PROFIL FANE */}
       {activeTab === "profile" && (
-        <div style={{ background: theme.card, padding: "20px", borderRadius: "8px", border: "1px solid #333" }}>
-          <h3 style={{ color: theme.accent, marginTop: 0 }}>Rediger din Dude-profil</h3>
+        <div style={{ background: theme.card, padding: "20px", border: `2px solid ${theme.accent}` }}>
+          <h3 style={{ color: theme.accent, marginTop: 0, fontFamily: "impact", fontSize: "24px" }}>DIT EGO TRIP</h3>
           
-          <div style={{ marginBottom: "15px" }}>
-            <label style={{ display: "block", marginBottom: "5px", color: theme.textSub, fontSize: "14px" }}>Din Bio:</label>
+          <div style={{ marginBottom: "20px" }}>
+            <label style={{ display: "block", marginBottom: "5px", color: theme.neon, fontSize: "16px", fontWeight: "bold", fontFamily: "impact" }}>DIN KAMP-BIO:</label>
             <textarea 
               value={myBio} 
               onChange={(e) => setMyBio(e.target.value)} 
-              placeholder="Skriv lidt om dig selv..."
-              style={{ width: "100%", padding: "10px", borderRadius: "6px", border: "none", background: theme.inputBg, color: theme.textMain, height: "80px", boxSizing: "border-box" }}
+              placeholder="SKRIV NOGET BRUTALT HER..."
+              style={{ width: "100%", padding: "15px", border: `1px solid ${theme.accent}`, background: theme.bg, color: theme.textMain, height: "100px", boxSizing: "border-box", fontWeight: "bold" }}
             />
           </div>
 
-          <div style={{ marginBottom: "20px" }}>
-            <label style={{ display: "block", marginBottom: "10px", color: theme.textSub, fontSize: "14px" }}>Profilbillede:</label>
+          <div style={{ marginBottom: "25px" }}>
+            <label style={{ display: "block", marginBottom: "10px", color: theme.neon, fontSize: "16px", fontWeight: "bold", fontFamily: "impact" }}>UPLOAD FLEX BILLEDE:</label>
             
-            {/* Viser det nuværende billede, hvis man har et */}
-            {myPhoto && <img src={myPhoto} alt="Preview" style={{ display: "block", marginBottom: "10px", width: "100px", height: "100px", borderRadius: "50%", objectFit: "cover", border: `2px solid ${theme.accent}` }} />}
+            {myPhoto && <img src={myPhoto} alt="Preview" style={{ display: "block", marginBottom: "15px", width: "120px", height: "120px", objectFit: "cover", border: `4px solid ${theme.accent}` }} />}
             
-            {/* Den nye Upload-knap */}
             <input 
               type="file" 
               accept="image/*"
               onChange={handleImageUpload}
-              style={{ width: "100%", padding: "10px", borderRadius: "6px", border: "1px dashed #555", background: theme.inputBg, color: theme.textMain, boxSizing: "border-box" }}
+              style={{ width: "100%", padding: "15px", border: `2px dashed ${theme.accent}`, background: theme.bg, color: theme.textMain, boxSizing: "border-box", fontWeight: "bold", cursor: "pointer" }}
             />
-            {isUploading && <p style={{ color: theme.accent, fontSize: "12px", marginTop: "5px" }}>Uploader billede... ⏳</p>}
+            {isUploading && <p style={{ color: theme.neon, fontSize: "14px", marginTop: "10px", fontWeight: "bold" }}>UPLOADER... HOLD VÆGTEN! ⏳</p>}
           </div>
 
-          <button onClick={saveProfile} style={{ width: "100%", padding: "12px", background: theme.accent, color: "white", border: "none", borderRadius: "6px", fontWeight: "bold", fontSize: "16px", cursor: "pointer" }}>
-            Gem Profil
+          <button onClick={saveProfile} style={{ width: "100%", padding: "15px", background: theme.accent, color: "white", border: "none", fontWeight: "bold", fontSize: "20px", cursor: "pointer", fontFamily: "impact", letterSpacing: "1px", boxShadow: `0 0 15px ${theme.accent}60` }}>
+            GEM LORTET 💥
           </button>
         </div>
       )}
