@@ -102,11 +102,11 @@ export default function App() {
   const monthNames = ["Januar", "Februar", "Marts", "April", "Maj", "Juni", "Juli", "August", "September", "Oktober", "November", "December"];
   const currentMonthName = monthNames[new Date().getMonth()];
 
-  const getStatsForMonth = (history = [], monthPrefix) => {
+  const getStatsForMonth = (history = []) => {
     let gym = 0, cardioKm = 0, cardioRuns = 0;
     history.forEach(h => {
       const d = typeof h === 'string' ? h : h.date;
-      if (d.startsWith(monthPrefix)) {
+      if (d.startsWith(currentMonthStr)) {
         if (typeof h === 'string' || h.type === 'gym') gym++;
         else if (h.type === 'cardio') { cardioRuns++; if (h.value) cardioKm += Number(h.value); }
       }
@@ -114,12 +114,26 @@ export default function App() {
     return { gym, cardioKm: parseFloat(cardioKm.toFixed(1)), totalActivities: gym + cardioRuns };
   };
 
+  // --- 🔥 NYT: COUNTER-STRIKE RANK SYSTEM 🔥 ---
+  const getRankInfo = (history = []) => {
+    const totalXP = history.length;
+    if (totalXP >= 100) return { title: "GLOBAL ELITE 🌍", color: "#ef4444" }; // Rød
+    if (totalXP >= 50) return { title: "LEGENDARY EAGLE 🦅", color: "#c084fc" }; // Lilla
+    if (totalXP >= 25) return { title: "MASTER GUARDIAN 🛡️", color: "#60a5fa" }; // Blå
+    if (totalXP >= 10) return { title: "GOLD NOVA ⭐", color: "#FBBF24" }; // Guld
+    return { title: "SILVER 💩", color: "#9CA3AF" }; // Grå
+  };
+
   const getLastMonthWinner = () => {
     if (!users.length) return null;
     let winner = null, maxScore = 0;
     users.forEach(u => {
-      const score = getStatsForMonth(u.history, prevMonthStr).totalActivities;
-      if (score > maxScore && score > 0) { maxScore = score; winner = u.id; }
+      let prevMonthActs = 0;
+      (u.history || []).forEach(h => {
+        const d = typeof h === 'string' ? h : h.date;
+        if (d.startsWith(prevMonthStr)) prevMonthActs++;
+      });
+      if (prevMonthActs > maxScore && prevMonthActs > 0) { maxScore = prevMonthActs; winner = u.id; }
     });
     return winner; 
   };
@@ -158,7 +172,7 @@ export default function App() {
       if (isRegistering) {
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
         await setDoc(doc(db, "users", userCredential.user.uid), {
-          name: name, workouts: 0, lastWorkoutDate: null, history: [], bio: "Klar til at dominere.", photoUrl: "", arc: "Vinter Arc ❄️", maxLifts: { bench: 0, squat: 0, deadlift: 0 }
+          name: name, workouts: 0, lastWorkoutDate: null, history: [], bio: "Rush B, don't stop.", photoUrl: "", arc: "Vinter Arc ❄️", maxLifts: { bench: 0, squat: 0, deadlift: 0 }
         });
       } else { await signInWithEmailAndPassword(auth, email, password); }
     } catch (error) { setErrorMsg("Fejl: " + error.message); }
@@ -303,8 +317,8 @@ export default function App() {
             <button key={t} onClick={() => { 
                 setActiveTab(t);
                 if (t === "profile") { setMyBio(currentUserData.bio || ""); setMyArc(currentUserData.arc || "Vinter Arc ❄️"); }
-              }} style={{ flex: 1, padding: "10px 0", borderRadius: "8px", border: "none", backgroundColor: activeTab === t ? theme.accent : "transparent", color: activeTab === t ? "#000" : theme.textSub, fontWeight: "bold", fontSize: "11px", cursor: "pointer" }}>
-              {t === "leaderboard" ? "Sæson" : t === "feed" ? "Flex" : t === "stats" ? "Stats" : t === "chat" ? "Chat" : "Profil"}
+              }} style={{ flex: 1, padding: "10px 0", borderRadius: "8px", border: "none", backgroundColor: activeTab === t ? theme.accent : "transparent", color: activeTab === t ? "#000" : theme.textSub, fontWeight: "bold", fontSize: "11px", cursor: "pointer", textTransform: "capitalize" }}>
+              {t === "leaderboard" ? "Sæson" : t === "feed" ? "Flex" : t}
             </button>
           ))}
         </div>
@@ -314,9 +328,11 @@ export default function App() {
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "15px" }}>
               <h3 style={{ margin: 0, fontSize: "16px", textTransform: "uppercase", color: theme.textSub }}>SÆSON: {currentMonthName}</h3>
             </div>
-            {users.map(u => ({ ...u, currentMonthStats: getStatsForMonth(u.history, currentMonthStr) })).sort((a, b) => b.currentMonthStats.totalActivities - a.currentMonthStats.totalActivities).map((user, index) => {
+            {users.map(u => ({ ...u, currentMonthStats: getStatsForMonth(u.history) })).sort((a, b) => b.currentMonthStats.totalActivities - a.currentMonthStats.totalActivities).map((user, index) => {
               const isMe = currentUser.uid === user.id;
               const streak = calculateStreak(user.history);
+              const rank = getRankInfo(user.history);
+
               return (
                 <div key={user.id} style={{ background: theme.card, marginBottom: "10px", borderRadius: "12px", border: isMe ? `1px solid ${theme.accent}` : "1px solid #333", overflow: "hidden" }}>
                   <div onClick={() => setExpandedUserId(expandedUserId === user.id ? null : user.id)} style={{ padding: "15px", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}>
@@ -324,8 +340,13 @@ export default function App() {
                       <div style={{ fontWeight: "bold", fontSize: "18px", color: index === 0 ? theme.accent : theme.textSub, width: "15px" }}>{index + 1}</div>
                       <img src={user.photoUrl} alt="" style={{ width: "40px", height: "40px", borderRadius: "50%", background: "#444", objectFit: "cover" }} />
                       <div>
-                        <div style={{ fontWeight: "bold", fontSize: "15px" }}>{user.name} {user.id === lastMonthWinnerId && "🏆"}</div>
-                        <div style={{ fontSize: "11px", color: theme.accent }}>{user.arc || "Vinter Arc ❄️"} | {streak} streak 🔥</div>
+                        <div style={{ fontWeight: "bold", fontSize: "15px", display: "flex", alignItems: "center", flexWrap: "wrap", gap: "4px" }}>
+                          {user.name} {user.id === lastMonthWinnerId && "🏆"}
+                          <span style={{ background: rank.color + "20", color: rank.color, padding: "2px 6px", borderRadius: "4px", fontSize: "9px", textTransform: "uppercase", fontWeight: "900", letterSpacing: "0.5px" }}>
+                            {rank.title}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: "11px", color: theme.accent, marginTop: "2px" }}>{user.arc || "Vinter Arc ❄️"} | {streak} streak 🔥</div>
                       </div>
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
@@ -410,11 +431,17 @@ export default function App() {
               const allTimeCardio = user.history.reduce((sum, h) => (h.type === "cardio" && h.value) ? sum + Number(h.value) : sum, 0);
               const allTimeGym = user.history.filter(h => typeof h === 'string' || h.type === 'gym').length;
               const canEdit = currentUser.uid === user.id || isAdmin;
+              const rank = getRankInfo(user.history);
               
               return (
                 <div key={user.id} style={{ background: theme.card, padding: "20px", marginBottom: "10px", borderRadius: "12px" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
-                    <h3 style={{ margin: 0 }}>{user.name}</h3>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                      <h3 style={{ margin: 0 }}>{user.name}</h3>
+                      <span style={{ background: rank.color + "20", color: rank.color, padding: "2px 6px", borderRadius: "4px", fontSize: "10px", textTransform: "uppercase", fontWeight: "bold" }}>
+                        {rank.title}
+                      </span>
+                    </div>
                     {user.id === lastMonthWinnerId && <span style={{fontSize: "20px"}}>🏆</span>}
                   </div>
                   <div style={{ display: "flex", gap: "10px", marginBottom: "20px" }}>
