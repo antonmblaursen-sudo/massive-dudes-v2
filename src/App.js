@@ -114,14 +114,14 @@ export default function App() {
     return { gym, cardioKm: parseFloat(cardioKm.toFixed(1)), totalActivities: gym + cardioRuns };
   };
 
-  // --- 🔥 NYT: COUNTER-STRIKE RANK SYSTEM 🔥 ---
+  // --- 🔥 COUNTER-STRIKE RANK SYSTEM UDEN EMOJIS 🔥 ---
   const getRankInfo = (history = []) => {
     const totalXP = history.length;
-    if (totalXP >= 100) return { title: "GLOBAL ELITE 🌍", color: "#ef4444" }; // Rød
-    if (totalXP >= 50) return { title: "LEGENDARY EAGLE 🦅", color: "#c084fc" }; // Lilla
-    if (totalXP >= 25) return { title: "MASTER GUARDIAN 🛡️", color: "#60a5fa" }; // Blå
-    if (totalXP >= 10) return { title: "GOLD NOVA ⭐", color: "#FBBF24" }; // Guld
-    return { title: "SILVER 💩", color: "#9CA3AF" }; // Grå
+    if (totalXP >= 100) return { title: "GLOBAL ELITE", color: "#ef4444" }; // Rød
+    if (totalXP >= 50) return { title: "LEGENDARY EAGLE", color: "#c084fc" }; // Lilla
+    if (totalXP >= 25) return { title: "MASTER GUARDIAN", color: "#60a5fa" }; // Blå
+    if (totalXP >= 10) return { title: "GOLD NOVA", color: "#FBBF24" }; // Guld
+    return { title: "SILVER", color: "#9CA3AF" }; // Grå
   };
 
   const getLastMonthWinner = () => {
