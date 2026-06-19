@@ -50,6 +50,7 @@ export default function App() {
   const [users, setUsers] = useState([]);
   const [feed, setFeed] = useState([]);
   const [recipes, setRecipes] = useState([]);
+  const [cookbookCategories, setCookbookCategories] = useState([]);
 
   const [weather, setWeather] = useState(null);
   const [expandedUserId, setExpandedUserId] = useState(null);
@@ -62,12 +63,15 @@ export default function App() {
   // MBL Cookbook State
   const [recipeTitle, setRecipeTitle] = useState("");
   const [recipeText, setRecipeText] = useState("");
-  const [recipeCategory, setRecipeCategory] = useState("Oksekød");
+  const [recipeCategory, setRecipeCategory] = useState("");
   const [recipeFile, setRecipeFile] = useState(null);
   const [isPostingRecipe, setIsPostingRecipe] = useState(false);
   const [editingRecipeId, setEditingRecipeId] = useState(null);
   const [existingRecipeImageUrl, setExistingRecipeImageUrl] = useState("");
   const [selectedFilter, setSelectedFilter] = useState("Alle");
+
+  // Admin Categories State
+  const [newCategoryName, setNewCategoryName] = useState("");
 
   const [currentUser, setCurrentUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -100,16 +104,6 @@ export default function App() {
     paddingBottom: "80px",
   };
 
-  const RECIPE_CATEGORIES = [
-    "Oksekød",
-    "Fugl",
-    "Gris",
-    "Fisk",
-    "Tilbehør",
-    "Mealprep",
-    "Andet",
-  ];
-
   useEffect(() => {
     fetch(
       "https://api.open-meteo.com/v1/forecast?latitude=55.6761&longitude=12.5683&current_weather=true"
@@ -119,9 +113,14 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    onAuthStateChanged(auth, (user) => {
+    onAuthStateChanged(auth, async (user) => {
       setCurrentUser(user);
       setLoading(false);
+      if (user) {
+        await updateDoc(doc(db, "users", user.uid), {
+          lastLogin: serverTimestamp(),
+        }).catch(() => {});
+      }
     });
 
     onSnapshot(collection(db, "users"), (snapshot) => {
@@ -144,6 +143,20 @@ export default function App() {
     onSnapshot(qRecipes, (snapshot) =>
       setRecipes(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })))
     );
+
+    onSnapshot(doc(db, "settings", "cookbook"), (docSnap) => {
+      if (docSnap.exists()) {
+        const fetchedCats = docSnap.data().categories || [];
+        setCookbookCategories(fetchedCats);
+        if (fetchedCats.length > 0 && !recipeCategory)
+          setRecipeCategory(fetchedCats[0]);
+      } else {
+        const defaultCats = ["Oksekød", "Kylling", "Gris", "Tilbehør"];
+        setDoc(doc(db, "settings", "cookbook"), { categories: defaultCats });
+        setCookbookCategories(defaultCats);
+        setRecipeCategory(defaultCats[0]);
+      }
+    });
 
     document.body.style.backgroundColor = theme.bg;
     document.body.style.margin = "0";
@@ -217,7 +230,6 @@ export default function App() {
     }
 
     try {
-      // Henter KUN den allernyeste aktivitet
       const res = await fetch(
         "https://www.strava.com/api/v3/athlete/activities?per_page=1",
         { headers: { Authorization: `Bearer ${token}` } }
@@ -290,7 +302,7 @@ export default function App() {
         alert("Fandt ingen aktiviteter.");
       }
     } catch (e) {
-      alert("Fejl ved hentning. Prøv at genforbinde Strava.");
+      alert("Fejl ved hentning fra Strava.");
     }
   };
 
@@ -333,15 +345,6 @@ export default function App() {
     };
   };
 
-  const getRankInfo = (history = []) => {
-    const totalXP = history.length;
-    if (totalXP >= 100) return { title: "GLOBAL ELITE", color: "#ef4444" };
-    if (totalXP >= 50) return { title: "LEGENDARY EAGLE", color: "#c084fc" };
-    if (totalXP >= 25) return { title: "MASTER GUARDIAN", color: "#60a5fa" };
-    if (totalXP >= 10) return { title: "GOLD NOVA", color: "#FBBF24" };
-    return { title: "SILVER", color: "#9CA3AF" };
-  };
-
   const calculateStreak = (history = []) => {
     if (!history.length) return 0;
     const datesOnly = history.map((h) => (typeof h === "string" ? h : h.date));
@@ -371,7 +374,6 @@ export default function App() {
           email,
           password
         );
-        // Nye brugere er IKKE godkendt som standard
         await setDoc(doc(db, "users", userCredential.user.uid), {
           name: name,
           workouts: 0,
@@ -382,6 +384,7 @@ export default function App() {
           arc: "Vinter Arc",
           maxLifts: { bench: 0, squat: 0, deadlift: 0 },
           isApproved: false,
+          lastLogin: serverTimestamp(),
         });
       } else {
         await signInWithEmailAndPassword(auth, email, password);
@@ -419,7 +422,7 @@ export default function App() {
     const userData = users.find((u) => u.id === currentUser.uid);
     const feedText =
       type === "gym"
-        ? `Har lige trænet: ${title}`
+        ? `Træning logget: ${title}`
         : `Løbetur: ${distance} km\n"${title}"`;
     await addDoc(collection(db, "feed"), {
       userId: currentUser.uid,
@@ -520,7 +523,7 @@ export default function App() {
     setEditingRecipeId(recipe.id);
     setRecipeTitle(recipe.title);
     setRecipeText(recipe.text);
-    setRecipeCategory(recipe.category || "Oksekød");
+    setRecipeCategory(recipe.category || cookbookCategories[0]);
     setExistingRecipeImageUrl(recipe.imageUrl || "");
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -561,14 +564,30 @@ export default function App() {
   };
 
   const adminDeleteUser = async (uid, name) => {
-    if (
-      window.confirm(
-        `Er du sikker på, at du vil fjerne ${name} fra databasen permanent?`
-      )
-    ) {
+    if (window.confirm(`Slet ${name} permanent?`)) {
       await deleteDoc(doc(db, "users", uid));
     }
   };
+
+  const handleAddCategory = async () => {
+    if (newCategoryName.trim()) {
+      await updateDoc(doc(db, "settings", "cookbook"), {
+        categories: arrayUnion(newCategoryName.trim()),
+      });
+      setNewCategoryName("");
+    }
+  };
+
+  const handleDeleteCategory = async (cat) => {
+    if (window.confirm(`Slet kategori: ${cat}?`)) {
+      await updateDoc(doc(db, "settings", "cookbook"), {
+        categories: arrayRemove(cat),
+      });
+    }
+  };
+
+  const getUserRecipeCount = (uid) =>
+    recipes.filter((r) => r.userId === uid).length;
 
   if (loading)
     return (
@@ -702,7 +721,6 @@ export default function App() {
   const currentUserData = users.find((u) => u.id === currentUser.uid);
   const isApproved = isAdmin || (currentUserData && currentUserData.isApproved);
 
-  // --- LÅST SKÆRM FOR NYE BRUGERE ---
   if (currentUserData && !isApproved) {
     return (
       <div style={mainStyle}>
@@ -731,8 +749,7 @@ export default function App() {
                 lineHeight: "1.5",
               }}
             >
-              Din konto er oprettet, men du mangler at blive godkendt af admin,
-              før du får adgang til platformen.
+              Din konto er oprettet. Afvent admin-godkendelse for adgang.
             </p>
             <button
               onClick={() => signOut(auth)}
@@ -795,10 +812,10 @@ export default function App() {
           }}
         >
           {[
-            { id: "feed", icon: "Feed" },
-            { id: "kogebog", icon: "Cookbook" },
-            { id: "leaderboard", icon: "Dudes" },
-            { id: "profile", icon: "Profil" },
+            { id: "feed", label: "Feed" },
+            { id: "kogebog", label: "Opskrifter" },
+            { id: "leaderboard", label: "Dudes" },
+            { id: "profile", label: "Profil" },
           ].map((t) => (
             <button
               key={t.id}
@@ -822,7 +839,7 @@ export default function App() {
                 cursor: "pointer",
               }}
             >
-              {t.icon}
+              {t.label}
             </button>
           ))}
           {isAdmin && (
@@ -870,7 +887,7 @@ export default function App() {
                   cursor: "pointer",
                 }}
               >
-                + Log Træning
+                Log Træning
               </button>
             </div>
 
@@ -1160,7 +1177,7 @@ export default function App() {
                           fontWeight: "bold",
                         }}
                       >
-                        Hype ({likeCount})
+                        🔥 {likeCount}
                       </button>
                       {(isOwner || isAdmin) && (
                         <button
@@ -1190,7 +1207,6 @@ export default function App() {
               MBL COOKBOOK
             </h3>
 
-            {/* OVERSIGT / INDEX */}
             <div
               style={{
                 background: theme.card,
@@ -1210,7 +1226,7 @@ export default function App() {
                   borderBottom: `1px solid ${theme.border}`,
                 }}
               >
-                {["Alle", ...RECIPE_CATEGORIES].map((cat) => (
+                {["Alle", ...cookbookCategories].map((cat) => (
                   <button
                     key={cat}
                     onClick={() => setSelectedFilter(cat)}
@@ -1257,13 +1273,12 @@ export default function App() {
                 ))}
                 {filteredRecipes.length === 0 && (
                   <div style={{ fontSize: "12px", color: theme.textSub }}>
-                    Ingen opskrifter i denne kategori.
+                    Ingen opskrifter fundet.
                   </div>
                 )}
               </div>
             </div>
 
-            {/* OPRET / REDIGER FORM */}
             <div
               style={{
                 background: theme.card,
@@ -1307,7 +1322,7 @@ export default function App() {
                     marginBottom: "10px",
                   }}
                 >
-                  {RECIPE_CATEGORIES.map((cat) => (
+                  {cookbookCategories.map((cat) => (
                     <option key={cat} value={cat}>
                       {cat}
                     </option>
@@ -1317,7 +1332,7 @@ export default function App() {
                 <textarea
                   value={recipeText}
                   onChange={(e) => setRecipeText(e.target.value)}
-                  placeholder="Fremgangsmåde, tid, temp..."
+                  placeholder="Opskrift detaljer..."
                   style={{
                     width: "100%",
                     height: "120px",
@@ -1407,7 +1422,6 @@ export default function App() {
               </form>
             </div>
 
-            {/* LISTE */}
             {filteredRecipes.map((recipe) => (
               <div
                 id={recipe.id}
@@ -1462,7 +1476,9 @@ export default function App() {
                     }}
                   >
                     Af {recipe.userName} •{" "}
-                    {recipe.createdAt
+                    {recipe.updatedAt
+                      ? new Date(recipe.updatedAt.toDate()).toLocaleDateString()
+                      : recipe.createdAt
                       ? new Date(recipe.createdAt.toDate()).toLocaleDateString()
                       : ""}
                   </div>
@@ -1543,7 +1559,6 @@ export default function App() {
               .map((user, index) => {
                 const isMe = currentUser.uid === user.id;
                 const streak = calculateStreak(user.history);
-                const rank = getRankInfo(user.history);
 
                 return (
                   <div
@@ -1612,19 +1627,6 @@ export default function App() {
                             }}
                           >
                             {user.name}
-                            <span
-                              style={{
-                                background: rank.color + "20",
-                                color: rank.color,
-                                padding: "2px 6px",
-                                borderRadius: "4px",
-                                fontSize: "9px",
-                                textTransform: "uppercase",
-                                fontWeight: "900",
-                              }}
-                            >
-                              {rank.title}
-                            </span>
                           </div>
                           <div
                             style={{
@@ -1633,7 +1635,7 @@ export default function App() {
                               marginTop: "2px",
                             }}
                           >
-                            {user.arc || "Vinter Arc"} | {streak} streak 🔥
+                            {user.arc || "Vinter Arc"} | {streak} streak
                           </div>
                         </div>
                       </div>
@@ -1646,10 +1648,10 @@ export default function App() {
                       >
                         <div style={{ textAlign: "right" }}>
                           <div style={{ fontWeight: "bold", fontSize: "14px" }}>
-                            {user.currentMonthStats.gym} 🏋️
+                            {user.currentMonthStats.gym} Træning
                           </div>
                           <div style={{ fontSize: "11px", color: "#60a5fa" }}>
-                            {user.currentMonthStats.cardioKm} km 🏃‍♂️
+                            {user.currentMonthStats.cardioKm} km
                           </div>
                         </div>
                       </div>
@@ -1716,8 +1718,7 @@ export default function App() {
                               }}
                             >
                               <span>
-                                {h.type === "gym" ? "🏋️" : "🏃‍♂️"} {h.title}{" "}
-                                {h.value && `(${h.value} km)`}
+                                {h.title} {h.value && `(${h.value} km)`}
                               </span>
                               <span style={{ color: theme.textSub }}>
                                 {h.date}
@@ -1746,7 +1747,7 @@ export default function App() {
             </h3>
 
             <h4 style={{ color: theme.textMain, marginTop: "20px" }}>
-              Nye Brugere (Afventer)
+              Brugere (Afventer Godkendelse)
             </h4>
             {users
               .filter((u) => !u.isApproved)
@@ -1767,7 +1768,7 @@ export default function App() {
                   <div>
                     <div style={{ fontWeight: "bold" }}>{user.name}</div>
                     <div style={{ fontSize: "11px", color: theme.textSub }}>
-                      ID: {user.id}
+                      Oprettet konto
                     </div>
                   </div>
                   <div style={{ display: "flex", gap: "10px" }}>
@@ -1803,12 +1804,12 @@ export default function App() {
               ))}
             {users.filter((u) => !u.isApproved).length === 0 && (
               <p style={{ fontSize: "12px", color: theme.textSub }}>
-                Ingen nye brugere venter.
+                Ingen afventende brugere.
               </p>
             )}
 
             <h4 style={{ color: theme.textMain, marginTop: "30px" }}>
-              Godkendte Brugere
+              Statistik & Godkendte Brugere
             </h4>
             {users
               .filter((u) => u.isApproved)
@@ -1817,18 +1818,49 @@ export default function App() {
                   key={user.id}
                   style={{
                     background: theme.card,
-                    padding: "10px 15px",
+                    padding: "12px 15px",
                     borderRadius: "8px",
-                    marginBottom: "8px",
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
+                    marginBottom: "10px",
+                    border: `1px solid ${theme.border}`,
                   }}
                 >
-                  <div style={{ fontWeight: "bold", fontSize: "14px" }}>
-                    {user.name}
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      marginBottom: "8px",
+                    }}
+                  >
+                    <div style={{ fontWeight: "bold", fontSize: "14px" }}>
+                      {user.name}
+                    </div>
+                    <div style={{ fontSize: "11px", color: theme.textSub }}>
+                      Seneste login:{" "}
+                      {user.lastLogin
+                        ? new Date(user.lastLogin.toDate()).toLocaleDateString()
+                        : "Ukendt"}
+                    </div>
                   </div>
-                  <div style={{ display: "flex", gap: "10px" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: "15px",
+                      fontSize: "12px",
+                      color: theme.textMain,
+                      marginBottom: "10px",
+                    }}
+                  >
+                    <span>Træninger: {(user.history || []).length}</span>
+                    <span>Opskrifter: {getUserRecipeCount(user.id)}</span>
+                  </div>
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: "10px",
+                      justifyContent: "flex-end",
+                    }}
+                  >
                     <button
                       onClick={() => toggleAdminApproval(user.id, true)}
                       style={{
@@ -1837,7 +1869,7 @@ export default function App() {
                         border: "none",
                         padding: "6px 10px",
                         borderRadius: "6px",
-                        fontSize: "12px",
+                        fontSize: "11px",
                         cursor: "pointer",
                       }}
                     >
@@ -1850,7 +1882,7 @@ export default function App() {
                           background: "transparent",
                           border: "none",
                           color: "#ef4444",
-                          fontSize: "12px",
+                          fontSize: "11px",
                           cursor: "pointer",
                         }}
                       >
@@ -1860,6 +1892,77 @@ export default function App() {
                   </div>
                 </div>
               ))}
+
+            <h4
+              style={{
+                color: theme.textMain,
+                marginTop: "30px",
+                borderTop: "1px solid #333",
+                paddingTop: "20px",
+              }}
+            >
+              Kogebog Kategorier
+            </h4>
+            <div style={{ display: "flex", gap: "10px", marginBottom: "15px" }}>
+              <input
+                value={newCategoryName}
+                onChange={(e) => setNewCategoryName(e.target.value)}
+                placeholder="Ny kategori..."
+                style={{
+                  flex: 1,
+                  padding: "10px",
+                  background: theme.inputBg,
+                  color: "white",
+                  border: "none",
+                  borderRadius: "8px",
+                }}
+              />
+              <button
+                onClick={handleAddCategory}
+                style={{
+                  background: theme.accent,
+                  color: "#000",
+                  border: "none",
+                  padding: "10px 15px",
+                  borderRadius: "8px",
+                  fontWeight: "bold",
+                  cursor: "pointer",
+                }}
+              >
+                Tilføj
+              </button>
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+              {cookbookCategories.map((cat) => (
+                <div
+                  key={cat}
+                  style={{
+                    background: theme.inputBg,
+                    padding: "6px 12px",
+                    borderRadius: "20px",
+                    fontSize: "12px",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                  }}
+                >
+                  {cat}
+                  <button
+                    onClick={() => handleDeleteCategory(cat)}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      color: "#ef4444",
+                      cursor: "pointer",
+                      fontSize: "12px",
+                      padding: 0,
+                    }}
+                  >
+                    x
+                  </button>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
