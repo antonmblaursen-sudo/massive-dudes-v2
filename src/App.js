@@ -47,10 +47,10 @@ const auth = getAuth(app);
 const storage = getStorage(app);
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState("feed"); // Nu starter vi i feedet!
+  const [activeTab, setActiveTab] = useState("feed");
   const [users, setUsers] = useState([]);
   const [feed, setFeed] = useState([]);
-  const [recipes, setRecipes] = useState([]); // NY: Kogebog state
+  const [recipes, setRecipes] = useState([]);
 
   const [weather, setWeather] = useState(null);
   const [expandedUserId, setExpandedUserId] = useState(null);
@@ -60,7 +60,6 @@ export default function App() {
   const [postFile, setPostFile] = useState(null);
   const [isPosting, setIsPosting] = useState(false);
 
-  // Kogebog forms
   const [recipeTitle, setRecipeTitle] = useState("");
   const [recipeText, setRecipeText] = useState("");
   const [recipeFile, setRecipeFile] = useState(null);
@@ -94,7 +93,7 @@ export default function App() {
     color: theme.textMain,
     fontFamily: "sans-serif",
     paddingBottom: "80px",
-  }; // Ekstra padding i bunden
+  };
 
   useEffect(() => {
     fetch(
@@ -104,7 +103,6 @@ export default function App() {
       .then((data) => setWeather(data.current_weather));
   }, []);
 
-  // --- DATA HENTNING ---
   useEffect(() => {
     onAuthStateChanged(auth, (user) => {
       setCurrentUser(user);
@@ -115,7 +113,6 @@ export default function App() {
       setUsers(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
     });
 
-    // Hent Feed
     const qFeed = query(
       collection(db, "feed"),
       orderBy("createdAt", "desc"),
@@ -125,7 +122,6 @@ export default function App() {
       setFeed(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })))
     );
 
-    // Hent Opskrifter
     const qRecipes = query(
       collection(db, "recipes"),
       orderBy("createdAt", "desc")
@@ -138,7 +134,6 @@ export default function App() {
     document.body.style.margin = "0";
   }, []);
 
-  // --- STRAVA FORBINDELSE ---
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const code = urlParams.get("code");
@@ -208,47 +203,94 @@ export default function App() {
 
     try {
       const res = await fetch(
-        "https://www.strava.com/api/v3/athlete/activities?per_page=1",
+        "https://www.strava.com/api/v3/athlete/activities?per_page=5",
         { headers: { Authorization: `Bearer ${token}` } }
       );
       const data = await res.json();
+
       if (data && data.length > 0) {
-        const act = data[0];
-        const distanceKm = (act.distance / 1000).toFixed(2);
-        const title = act.name;
-        const actDate = act.start_date_local.split("T")[0];
+        let addedCount = 0;
+        const userHistory = userData.history || [];
 
-        const activityObj = {
-          date: actDate,
-          type: "cardio",
-          title: `🟠 ${title}`,
-          value: Number(distanceKm),
-        };
-        await updateDoc(doc(db, "users", currentUser.uid), {
-          lastWorkoutDate: actDate,
-          history: arrayUnion(activityObj),
-        });
+        for (const act of data) {
+          const distanceKm = (act.distance / 1000).toFixed(2);
+          const title = act.name;
+          const actDate = act.start_date_local.split("T")[0];
+          const stravaId = act.id.toString();
 
-        await addDoc(collection(db, "feed"), {
-          userId: currentUser.uid,
-          userName: userData.name,
-          userPhoto: userData.photoUrl || "",
-          text: `Har lige løbet ${distanceKm} km på Strava! 🏃‍♂️💨\n"${title}"`,
-          imageUrl:
-            "https://images.unsplash.com/photo-1552674605-db6ffd4facb5?auto=format&fit=crop&w=800&q=80",
-          likes: [],
-          createdAt: serverTimestamp(),
-          isStrava: true,
-        });
-        alert(
-          `SUCCES! Hentede din tur: ${title} (${distanceKm} km)! Delt i feedet 🦍💨`
-        );
+          const alreadyLogged = userHistory.some(
+            (h) => h.stravaId === stravaId
+          );
+
+          if (!alreadyLogged && act.distance > 0) {
+            // --- BEREGN STATS TIL FEED KORTET ---
+            const hrs = Math.floor(act.moving_time / 3600);
+            const mins = Math.floor((act.moving_time % 3600) / 60)
+              .toString()
+              .padStart(2, "0");
+            const secs = (act.moving_time % 60).toString().padStart(2, "0");
+            const timeStr = hrs > 0 ? `${hrs}t ${mins}m` : `${mins}m ${secs}s`;
+
+            let paceStr = "0:00";
+            if (act.average_speed > 0) {
+              const paceDecimal = 16.6667 / act.average_speed;
+              const paceMin = Math.floor(paceDecimal);
+              const paceSec = Math.floor((paceDecimal - paceMin) * 60)
+                .toString()
+                .padStart(2, "0");
+              paceStr = `${paceMin}:${paceSec}`;
+            }
+
+            const elevation = act.total_elevation_gain || 0;
+
+            const activityObj = {
+              date: actDate,
+              type: "cardio",
+              title: `🟠 ${title}`,
+              value: Number(distanceKm),
+              stravaId: stravaId,
+            };
+
+            await updateDoc(doc(db, "users", currentUser.uid), {
+              lastWorkoutDate: actDate,
+              history: arrayUnion(activityObj),
+            });
+
+            await addDoc(collection(db, "feed"), {
+              userId: currentUser.uid,
+              userName: userData.name,
+              userPhoto: userData.photoUrl || "",
+              text: title,
+              imageUrl: "", // Intet standardbillede længere!
+              likes: [],
+              createdAt: serverTimestamp(),
+              isStrava: true,
+              stravaStats: {
+                distance: distanceKm,
+                time: timeStr,
+                pace: paceStr,
+                elevation: elevation,
+              },
+            });
+            addedCount++;
+          }
+        }
+
+        if (addedCount > 0) {
+          alert(
+            `SUCCES! Sugede ${addedCount} nye Strava-ture ind på feedet! 🦍💨`
+          );
+        } else {
+          alert(
+            "Ingen nye ture fundet. Du har allerede logget dine seneste ture. Ud og sved igen! 🏃‍♂️"
+          );
+        }
       } else {
-        alert("Fandt ingen løbeture på din Strava.");
+        alert("Fandt slet ingen aktiviteter på din Strava.");
       }
     } catch (e) {
       alert(
-        "Fejl ved hentning. Prøv at forbinde Strava igen under din Profil."
+        "Fejl ved hentning fra Strava. Prøv at genforbinde under din Profil."
       );
     }
   };
@@ -373,7 +415,6 @@ export default function App() {
     if (type === "gym") updateData.workouts = increment(1);
     await updateDoc(doc(db, "users", currentUser.uid), updateData);
 
-    // NU POSTER VI OGSÅ MANUEL TRÆNING TIL FEEDET!
     const userData = users.find((u) => u.id === currentUser.uid);
     const feedText =
       type === "gym"
@@ -384,10 +425,10 @@ export default function App() {
       userName: userData.name,
       userPhoto: userData.photoUrl || "",
       text: feedText,
-      imageUrl: "", // Intet billede
+      imageUrl: "",
       likes: [],
       createdAt: serverTimestamp(),
-      isActivityLog: true, // Markør til CSS
+      isActivityLog: true,
     });
 
     setShowLogModal(false);
@@ -612,7 +653,6 @@ export default function App() {
   return (
     <div style={mainStyle}>
       <div style={{ padding: "15px", maxWidth: "600px", margin: "0 auto" }}>
-        {/* TOP BAR */}
         <div
           style={{
             display: "flex",
@@ -632,7 +672,6 @@ export default function App() {
           )}
         </div>
 
-        {/* NAVIGATION TABS */}
         <div
           style={{
             display: "flex",
@@ -685,7 +724,6 @@ export default function App() {
           ))}
         </div>
 
-        {/* ================= FEED (FORSIDEN) ================= */}
         {activeTab === "feed" && (
           <div>
             <div
@@ -715,7 +753,6 @@ export default function App() {
               </button>
             </div>
 
-            {/* Opret Opslag boks */}
             <div
               style={{
                 background: theme.card,
@@ -779,7 +816,6 @@ export default function App() {
               </form>
             </div>
 
-            {/* Feed Liste */}
             {feed.map((post) => {
               const hasLiked =
                 post.likes && post.likes.includes(currentUser.uid);
@@ -843,7 +879,128 @@ export default function App() {
                       </div>
                     </div>
                   </div>
-                  {post.imageUrl && (
+
+                  {/* === DET NYE BRUTALE STRAVA STAT-CARD === */}
+                  {post.isStrava && post.stravaStats ? (
+                    <div
+                      style={{
+                        background:
+                          "linear-gradient(135deg, #fc4c02 0%, #e34402 100%)",
+                        padding: "20px",
+                        color: "white",
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          marginBottom: "15px",
+                        }}
+                      >
+                        <h4
+                          style={{
+                            margin: 0,
+                            fontSize: "16px",
+                            textShadow: "1px 1px 2px rgba(0,0,0,0.3)",
+                          }}
+                        >
+                          {post.text}
+                        </h4>
+                        <span style={{ fontSize: "20px" }}>🏃‍♂️</span>
+                      </div>
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          background: "rgba(0,0,0,0.2)",
+                          borderRadius: "12px",
+                          padding: "15px",
+                        }}
+                      >
+                        <div style={{ textAlign: "center", flex: 1 }}>
+                          <div
+                            style={{
+                              fontSize: "10px",
+                              opacity: 0.8,
+                              textTransform: "uppercase",
+                              letterSpacing: "1px",
+                              marginBottom: "4px",
+                            }}
+                          >
+                            Distance
+                          </div>
+                          <div style={{ fontSize: "18px", fontWeight: "900" }}>
+                            {post.stravaStats.distance}
+                            <span
+                              style={{ fontSize: "11px", fontWeight: "normal" }}
+                            >
+                              {" "}
+                              km
+                            </span>
+                          </div>
+                        </div>
+                        <div
+                          style={{
+                            textAlign: "center",
+                            flex: 1,
+                            borderLeft: "1px solid rgba(255,255,255,0.2)",
+                            borderRight: "1px solid rgba(255,255,255,0.2)",
+                          }}
+                        >
+                          <div
+                            style={{
+                              fontSize: "10px",
+                              opacity: 0.8,
+                              textTransform: "uppercase",
+                              letterSpacing: "1px",
+                              marginBottom: "4px",
+                            }}
+                          >
+                            Pace
+                          </div>
+                          <div style={{ fontSize: "18px", fontWeight: "900" }}>
+                            {post.stravaStats.pace}
+                            <span
+                              style={{ fontSize: "11px", fontWeight: "normal" }}
+                            >
+                              {" "}
+                              /km
+                            </span>
+                          </div>
+                        </div>
+                        <div style={{ textAlign: "center", flex: 1 }}>
+                          <div
+                            style={{
+                              fontSize: "10px",
+                              opacity: 0.8,
+                              textTransform: "uppercase",
+                              letterSpacing: "1px",
+                              marginBottom: "4px",
+                            }}
+                          >
+                            Tid
+                          </div>
+                          <div style={{ fontSize: "18px", fontWeight: "900" }}>
+                            {post.stravaStats.time}
+                          </div>
+                        </div>
+                      </div>
+                      {post.stravaStats.elevation > 0 && (
+                        <div
+                          style={{
+                            textAlign: "center",
+                            marginTop: "12px",
+                            fontSize: "12px",
+                            opacity: 0.9,
+                            fontWeight: "bold",
+                          }}
+                        >
+                          ⛰️ {post.stravaStats.elevation} m stigning
+                        </div>
+                      )}
+                    </div>
+                  ) : post.imageUrl ? (
                     <img
                       src={post.imageUrl}
                       alt="Post"
@@ -854,9 +1011,11 @@ export default function App() {
                         display: "block",
                       }}
                     />
-                  )}
+                  ) : null}
+                  {/* ========================================== */}
+
                   <div style={{ padding: "15px" }}>
-                    {post.text && (
+                    {post.text && !post.isStrava && (
                       <p
                         style={{
                           margin: "0 0 15px 0",
@@ -920,7 +1079,6 @@ export default function App() {
           </div>
         )}
 
-        {/* ================= KOGEBOG (BLOG) ================= */}
         {activeTab === "kogebog" && (
           <div>
             <h3 style={{ margin: "0 0 15px 0", color: theme.textMain }}>
@@ -1019,7 +1177,6 @@ export default function App() {
               </form>
             </div>
 
-            {/* Opskrifter Liste */}
             {recipes.map((recipe) => (
               <div
                 key={recipe.id}
@@ -1116,7 +1273,6 @@ export default function App() {
           </div>
         )}
 
-        {/* ================= LEADERBOARD (DUDES) ================= */}
         {activeTab === "leaderboard" && (
           <div>
             <h3 style={{ margin: "0 0 15px 0", color: theme.textMain }}>
@@ -1324,7 +1480,6 @@ export default function App() {
           </div>
         )}
 
-        {/* LOG MODAL */}
         {showLogModal && (
           <div
             style={{
@@ -1442,7 +1597,6 @@ export default function App() {
           </div>
         )}
 
-        {/* ================= PROFIL ================= */}
         {activeTab === "profile" && (
           <div
             style={{
