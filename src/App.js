@@ -47,11 +47,11 @@ const auth = getAuth(app);
 const storage = getStorage(app);
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState("leaderboard");
+  const [activeTab, setActiveTab] = useState("feed"); // Nu starter vi i feedet!
   const [users, setUsers] = useState([]);
-  const [messages, setMessages] = useState([]);
   const [feed, setFeed] = useState([]);
-  const [newMessage, setNewMessage] = useState("");
+  const [recipes, setRecipes] = useState([]); // NY: Kogebog state
+
   const [weather, setWeather] = useState(null);
   const [expandedUserId, setExpandedUserId] = useState(null);
   const [showLogModal, setShowLogModal] = useState(false);
@@ -59,6 +59,12 @@ export default function App() {
   const [postText, setPostText] = useState("");
   const [postFile, setPostFile] = useState(null);
   const [isPosting, setIsPosting] = useState(false);
+
+  // Kogebog forms
+  const [recipeTitle, setRecipeTitle] = useState("");
+  const [recipeText, setRecipeText] = useState("");
+  const [recipeFile, setRecipeFile] = useState(null);
+  const [isPostingRecipe, setIsPostingRecipe] = useState(false);
 
   const [currentUser, setCurrentUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -71,7 +77,6 @@ export default function App() {
   const [myBio, setMyBio] = useState("");
   const [myPhoto, setMyPhoto] = useState("");
   const [myArc, setMyArc] = useState("Vinter Arc ❄️");
-  const [isUploading, setIsUploading] = useState(false);
 
   const isAdmin = currentUser && currentUser.email === ADMIN_EMAIL;
   const theme = {
@@ -88,8 +93,8 @@ export default function App() {
     backgroundColor: theme.bg,
     color: theme.textMain,
     fontFamily: "sans-serif",
-    paddingBottom: "30px",
-  };
+    paddingBottom: "80px",
+  }; // Ekstra padding i bunden
 
   useEffect(() => {
     fetch(
@@ -99,7 +104,7 @@ export default function App() {
       .then((data) => setWeather(data.current_weather));
   }, []);
 
-  // --- DATA HENTNING (Nu hvor vi har fikset den!) ---
+  // --- DATA HENTNING ---
   useEffect(() => {
     onAuthStateChanged(auth, (user) => {
       setCurrentUser(user);
@@ -110,31 +115,30 @@ export default function App() {
       setUsers(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
     });
 
-    const qMsg = query(
-      collection(db, "messages"),
-      orderBy("createdAt", "desc"),
-      limit(50)
-    );
-    onSnapshot(qMsg, (snapshot) =>
-      setMessages(
-        snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })).reverse()
-      )
-    );
-
+    // Hent Feed
     const qFeed = query(
       collection(db, "feed"),
       orderBy("createdAt", "desc"),
-      limit(30)
+      limit(40)
     );
     onSnapshot(qFeed, (snapshot) =>
       setFeed(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })))
+    );
+
+    // Hent Opskrifter
+    const qRecipes = query(
+      collection(db, "recipes"),
+      orderBy("createdAt", "desc")
+    );
+    onSnapshot(qRecipes, (snapshot) =>
+      setRecipes(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })))
     );
 
     document.body.style.backgroundColor = theme.bg;
     document.body.style.margin = "0";
   }, []);
 
-  // --- STRAVA FORBINDELSE & HENTNING ---
+  // --- STRAVA FORBINDELSE ---
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const code = urlParams.get("code");
@@ -214,7 +218,6 @@ export default function App() {
         const title = act.name;
         const actDate = act.start_date_local.split("T")[0];
 
-        // Log i history (stats)
         const activityObj = {
           date: actDate,
           type: "cardio",
@@ -226,19 +229,17 @@ export default function App() {
           history: arrayUnion(activityObj),
         });
 
-        // Lav automatisk et feed post!
         await addDoc(collection(db, "feed"), {
           userId: currentUser.uid,
           userName: userData.name,
           userPhoto: userData.photoUrl || "",
           text: `Har lige løbet ${distanceKm} km på Strava! 🏃‍♂️💨\n"${title}"`,
           imageUrl:
-            "https://images.unsplash.com/photo-1552674605-db6ffd4facb5?auto=format&fit=crop&w=800&q=80", // Standard løbebillede
+            "https://images.unsplash.com/photo-1552674605-db6ffd4facb5?auto=format&fit=crop&w=800&q=80",
           likes: [],
           createdAt: serverTimestamp(),
           isStrava: true,
         });
-
         alert(
           `SUCCES! Hentede din tur: ${title} (${distanceKm} km)! Delt i feedet 🦍💨`
         );
@@ -252,14 +253,8 @@ export default function App() {
     }
   };
 
-  // --- DATO & STATS LOGIK ---
   const getTodayDate = () => new Date().toISOString().split("T")[0];
   const currentMonthStr = getTodayDate().substring(0, 7);
-  const prevMonthStr = (() => {
-    const d = new Date();
-    d.setMonth(d.getMonth() - 1);
-    return d.toISOString().substring(0, 7);
-  })();
   const monthNames = [
     "Januar",
     "Februar",
@@ -304,43 +299,6 @@ export default function App() {
     if (totalXP >= 25) return { title: "MASTER GUARDIAN", color: "#60a5fa" };
     if (totalXP >= 10) return { title: "GOLD NOVA", color: "#FBBF24" };
     return { title: "SILVER", color: "#9CA3AF" };
-  };
-
-  const getLastMonthWinner = () => {
-    if (!users.length) return null;
-    let winner = null,
-      maxScore = 0;
-    users.forEach((u) => {
-      let prevMonthActs = 0;
-      (u.history || []).forEach((h) => {
-        const d = typeof h === "string" ? h : h.date;
-        if (d.startsWith(prevMonthStr)) prevMonthActs++;
-      });
-      if (prevMonthActs > maxScore && prevMonthActs > 0) {
-        maxScore = prevMonthActs;
-        winner = u.id;
-      }
-    });
-    return winner;
-  };
-  const lastMonthWinnerId = getLastMonthWinner();
-
-  const getMVP = () => {
-    if (!users.length) return null;
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-    let mvp = null,
-      maxCount = -1;
-    users.forEach((user) => {
-      const recentActivities = (user.history || []).filter((h) => {
-        return new Date(typeof h === "string" ? h : h.date) >= sevenDaysAgo;
-      }).length;
-      if (recentActivities > maxCount && recentActivities > 0) {
-        maxCount = recentActivities;
-        mvp = { ...user, weeklyCount: recentActivities };
-      }
-    });
-    return mvp;
   };
 
   const calculateStreak = (history = []) => {
@@ -414,6 +372,24 @@ export default function App() {
     };
     if (type === "gym") updateData.workouts = increment(1);
     await updateDoc(doc(db, "users", currentUser.uid), updateData);
+
+    // NU POSTER VI OGSÅ MANUEL TRÆNING TIL FEEDET!
+    const userData = users.find((u) => u.id === currentUser.uid);
+    const feedText =
+      type === "gym"
+        ? `Har lige trænet: ${title} 🏋️🔥`
+        : `Har lige løbet ${distance} km! 🏃‍♂️💨\n"${title}"`;
+    await addDoc(collection(db, "feed"), {
+      userId: currentUser.uid,
+      userName: userData.name,
+      userPhoto: userData.photoUrl || "",
+      text: feedText,
+      imageUrl: "", // Intet billede
+      likes: [],
+      createdAt: serverTimestamp(),
+      isActivityLog: true, // Markør til CSS
+    });
+
     setShowLogModal(false);
   };
 
@@ -428,22 +404,18 @@ export default function App() {
     }
   };
 
-  const updateMax = async (id, field, currentVal, name) => {
-    const newVal = prompt(`Nyt maks i ${field} for ${name}:`, currentVal);
-    if (newVal !== null && !isNaN(newVal))
-      await updateDoc(doc(db, "users", id), {
-        [`maxLifts.${field}`]: Number(newVal),
-      });
-  };
-
   const submitPost = async (e) => {
     e.preventDefault();
-    if (!postFile) return alert("Du skal vælge et billede for at flekse! 📸");
+    if (!postFile && !postText)
+      return alert("Skriv noget eller upload et billede! 📸");
     setIsPosting(true);
     try {
-      const imgRef = ref(storage, `feed/${currentUser.uid}_${Date.now()}`);
-      await uploadBytes(imgRef, postFile);
-      const url = await getDownloadURL(imgRef);
+      let url = "";
+      if (postFile) {
+        const imgRef = ref(storage, `feed/${currentUser.uid}_${Date.now()}`);
+        await uploadBytes(imgRef, postFile);
+        url = await getDownloadURL(imgRef);
+      }
       const userData = users.find((u) => u.id === currentUser.uid);
       await addDoc(collection(db, "feed"), {
         userId: currentUser.uid,
@@ -462,6 +434,34 @@ export default function App() {
     setIsPosting(false);
   };
 
+  const submitRecipe = async (e) => {
+    e.preventDefault();
+    if (!recipeFile) return alert("Husk et lækkert billede af maden! 🥩");
+    if (!recipeTitle) return alert("Giv opskriften en titel!");
+    setIsPostingRecipe(true);
+    try {
+      const imgRef = ref(storage, `recipes/${currentUser.uid}_${Date.now()}`);
+      await uploadBytes(imgRef, recipeFile);
+      const url = await getDownloadURL(imgRef);
+      const userData = users.find((u) => u.id === currentUser.uid);
+      await addDoc(collection(db, "recipes"), {
+        userId: currentUser.uid,
+        userName: userData.name,
+        userPhoto: userData.photoUrl || "",
+        title: recipeTitle,
+        text: recipeText,
+        imageUrl: url,
+        createdAt: serverTimestamp(),
+      });
+      setRecipeTitle("");
+      setRecipeText("");
+      setRecipeFile(null);
+    } catch (err) {
+      alert("Fejl ved upload: " + err.message);
+    }
+    setIsPostingRecipe(false);
+  };
+
   const toggleLike = async (postId, currentLikes) => {
     const postRef = doc(db, "feed", postId);
     if (currentLikes.includes(currentUser.uid)) {
@@ -471,29 +471,15 @@ export default function App() {
     }
   };
 
-  const deletePost = async (postId) => {
-    if (window.confirm("Slet dette flex?")) {
-      await deleteDoc(doc(db, "feed", postId));
+  const deletePost = async (postId, collectionName = "feed") => {
+    if (window.confirm("Slet dette opslag?")) {
+      await deleteDoc(doc(db, collectionName, postId));
     }
-  };
-
-  const sendChatMessage = async (e) => {
-    e.preventDefault();
-    if (!newMessage.trim()) return;
-    const userData = users.find((u) => u.id === currentUser.uid);
-    await addDoc(collection(db, "messages"), {
-      text: newMessage,
-      userName: userData?.name,
-      userId: currentUser.uid,
-      createdAt: serverTimestamp(),
-    });
-    setNewMessage("");
   };
 
   const handleImageUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    setIsUploading(true);
     const imageRef = ref(storage, `profile_pictures/${currentUser.uid}`);
     try {
       await uploadBytes(imageRef, file);
@@ -503,7 +489,6 @@ export default function App() {
     } catch (error) {
       alert(error.message);
     }
-    setIsUploading(false);
   };
 
   if (loading)
@@ -539,7 +524,7 @@ export default function App() {
               marginTop: "50px",
             }}
           >
-            <h1 style={{ color: theme.accent, marginTop: 0 }}>MASSIVE DUDES</h1>
+            <h1 style={{ color: theme.accent, marginTop: 0 }}>MIN APP</h1>
             {errorMsg && <p style={{ color: "#ef4444" }}>{errorMsg}</p>}
             <form
               onSubmit={handleAuth}
@@ -623,82 +608,56 @@ export default function App() {
   }
 
   const currentUserData = users.find((u) => u.id === currentUser.uid) || {};
-  const mvp = getMVP();
 
   return (
     <div style={mainStyle}>
-      <div style={{ padding: "15px", maxWidth: "500px", margin: "0 auto" }}>
+      <div style={{ padding: "15px", maxWidth: "600px", margin: "0 auto" }}>
+        {/* TOP BAR */}
         <div
           style={{
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
-            marginBottom: "20px",
+            marginBottom: "15px",
             paddingTop: "10px",
           }}
         >
-          <h2 style={{ color: theme.accent, margin: 0 }}>
-            MASSIVE DUDES {isAdmin && "👑"}
+          <h2 style={{ color: theme.accent, margin: 0, letterSpacing: "1px" }}>
+            MASSIVE DUDES
           </h2>
           {weather && (
             <div style={{ fontSize: "11px", color: theme.textSub }}>
-              {weather.temperature}°C | Go' træning!
+              {weather.temperature}°C udenfor
             </div>
           )}
         </div>
 
-        {activeTab === "leaderboard" && mvp && (
-          <div
-            style={{
-              background: "linear-gradient(45deg, #F59E0B, #B45309)",
-              padding: "15px",
-              borderRadius: "12px",
-              marginBottom: "20px",
-              textAlign: "center",
-              boxShadow: "0 4px 15px rgba(245, 158, 11, 0.3)",
-            }}
-          >
-            <div
-              style={{
-                fontSize: "12px",
-                fontWeight: "bold",
-                color: "rgba(0,0,0,0.6)",
-                textTransform: "uppercase",
-              }}
-            >
-              MVP OF THE WEEK ⚡
-            </div>
-            <div style={{ fontSize: "22px", fontWeight: "900", color: "#000" }}>
-              {mvp.name.toUpperCase()}
-            </div>
-            <div
-              style={{
-                fontSize: "13px",
-                color: "rgba(0,0,0,0.7)",
-                fontWeight: "bold",
-              }}
-            >
-              {mvp.weeklyCount} AKTIVITETER DE SIDSTE 7 DAGE
-            </div>
-          </div>
-        )}
-
+        {/* NAVIGATION TABS */}
         <div
           style={{
             display: "flex",
-            gap: "4px",
+            gap: "5px",
             marginBottom: "20px",
             background: theme.card,
             padding: "5px",
             borderRadius: "10px",
+            position: "sticky",
+            top: "10px",
+            zIndex: 50,
+            boxShadow: "0 4px 10px rgba(0,0,0,0.5)",
           }}
         >
-          {["leaderboard", "feed", "stats", "chat", "profile"].map((t) => (
+          {[
+            { id: "feed", icon: "📱", label: "Feed" },
+            { id: "kogebog", icon: "🥩", label: "Opskrifter" },
+            { id: "leaderboard", icon: "🏆", label: "Dudes" },
+            { id: "profile", icon: "⚙️", label: "Profil" },
+          ].map((t) => (
             <button
-              key={t}
+              key={t.id}
               onClick={() => {
-                setActiveTab(t);
-                if (t === "profile") {
+                setActiveTab(t.id);
+                if (t.id === "profile") {
                   setMyBio(currentUserData.bio || "");
                   setMyArc(currentUserData.arc || "Vinter Arc ❄️");
                 }
@@ -708,20 +667,26 @@ export default function App() {
                 padding: "10px 0",
                 borderRadius: "8px",
                 border: "none",
-                backgroundColor: activeTab === t ? theme.accent : "transparent",
-                color: activeTab === t ? "#000" : theme.textSub,
+                backgroundColor:
+                  activeTab === t.id ? theme.accent : "transparent",
+                color: activeTab === t.id ? "#000" : theme.textSub,
                 fontWeight: "bold",
                 fontSize: "11px",
                 cursor: "pointer",
-                textTransform: "capitalize",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: "4px",
               }}
             >
-              {t === "leaderboard" ? "Sæson" : t === "feed" ? "Flex" : t}
+              <span style={{ fontSize: "16px" }}>{t.icon}</span>
+              {t.label}
             </button>
           ))}
         </div>
 
-        {activeTab === "leaderboard" && (
+        {/* ================= FEED (FORSIDEN) ================= */}
+        {activeTab === "feed" && (
           <div>
             <div
               style={{
@@ -731,17 +696,432 @@ export default function App() {
                 marginBottom: "15px",
               }}
             >
-              <h3
+              <h3 style={{ margin: 0, color: theme.textMain }}>Aktivitet</h3>
+              <button
+                onClick={() => setShowLogModal(true)}
                 style={{
-                  margin: 0,
-                  fontSize: "16px",
-                  textTransform: "uppercase",
-                  color: theme.textSub,
+                  padding: "8px 16px",
+                  borderRadius: "20px",
+                  background: theme.accent,
+                  color: "#000",
+                  border: "none",
+                  fontSize: "13px",
+                  fontWeight: "bold",
+                  cursor: "pointer",
+                  boxShadow: "0 2px 10px rgba(245, 158, 11, 0.3)",
                 }}
               >
-                SÆSON: {currentMonthName}
-              </h3>
+                + Log Træning
+              </button>
             </div>
+
+            {/* Opret Opslag boks */}
+            <div
+              style={{
+                background: theme.card,
+                padding: "15px",
+                borderRadius: "12px",
+                marginBottom: "20px",
+                border: `1px solid ${theme.border}`,
+              }}
+            >
+              <form onSubmit={submitPost}>
+                <textarea
+                  value={postText}
+                  onChange={(e) => setPostText(e.target.value)}
+                  placeholder="Hvad sker der bro? Smid et flex..."
+                  style={{
+                    width: "100%",
+                    height: "50px",
+                    background: theme.inputBg,
+                    color: "white",
+                    border: "none",
+                    borderRadius: "8px",
+                    padding: "10px",
+                    boxSizing: "border-box",
+                    marginBottom: "10px",
+                    resize: "none",
+                  }}
+                />
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                  }}
+                >
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => setPostFile(e.target.files[0])}
+                    style={{
+                      color: theme.textSub,
+                      fontSize: "12px",
+                      width: "60%",
+                    }}
+                  />
+                  <button
+                    type="submit"
+                    disabled={isPosting}
+                    style={{
+                      padding: "8px 15px",
+                      background: isPosting ? "#555" : theme.accent,
+                      color: isPosting ? "#ccc" : "#000",
+                      border: "none",
+                      borderRadius: "8px",
+                      fontWeight: "bold",
+                      cursor: isPosting ? "default" : "pointer",
+                    }}
+                  >
+                    {isPosting ? "..." : "Post 📸"}
+                  </button>
+                </div>
+              </form>
+            </div>
+
+            {/* Feed Liste */}
+            {feed.map((post) => {
+              const hasLiked =
+                post.likes && post.likes.includes(currentUser.uid);
+              const likeCount = post.likes ? post.likes.length : 0;
+              const isOwner = currentUser.uid === post.userId;
+
+              return (
+                <div
+                  key={post.id}
+                  style={{
+                    background: theme.card,
+                    borderRadius: "12px",
+                    marginBottom: "20px",
+                    overflow: "hidden",
+                    border: post.isStrava
+                      ? "2px solid #fc4c02"
+                      : post.isActivityLog
+                      ? "1px solid #3b82f6"
+                      : `1px solid ${theme.border}`,
+                  }}
+                >
+                  <div
+                    style={{
+                      padding: "12px",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "10px",
+                      background: post.isStrava
+                        ? "rgba(252, 76, 2, 0.1)"
+                        : post.isActivityLog
+                        ? "rgba(59, 130, 246, 0.1)"
+                        : "transparent",
+                    }}
+                  >
+                    <img
+                      src={post.userPhoto || "https://via.placeholder.com/40"}
+                      alt=""
+                      style={{
+                        width: "36px",
+                        height: "36px",
+                        borderRadius: "50%",
+                        objectFit: "cover",
+                      }}
+                    />
+                    <div>
+                      <div style={{ fontWeight: "bold", fontSize: "14px" }}>
+                        {post.userName} {post.isStrava && "🟠"}
+                      </div>
+                      <div style={{ fontSize: "11px", color: theme.textSub }}>
+                        {post.createdAt
+                          ? new Date(post.createdAt.toDate()).toLocaleString(
+                              [],
+                              {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                                day: "2-digit",
+                                month: "short",
+                              }
+                            )
+                          : "Lige nu"}
+                      </div>
+                    </div>
+                  </div>
+                  {post.imageUrl && (
+                    <img
+                      src={post.imageUrl}
+                      alt="Post"
+                      style={{
+                        width: "100%",
+                        maxHeight: "500px",
+                        objectFit: "cover",
+                        display: "block",
+                      }}
+                    />
+                  )}
+                  <div style={{ padding: "15px" }}>
+                    {post.text && (
+                      <p
+                        style={{
+                          margin: "0 0 15px 0",
+                          fontSize: "14px",
+                          lineHeight: "1.5",
+                          whiteSpace: "pre-line",
+                          fontWeight: post.isActivityLog ? "bold" : "normal",
+                        }}
+                      >
+                        {post.text}
+                      </p>
+                    )}
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                      }}
+                    >
+                      <button
+                        onClick={() => toggleLike(post.id, post.likes || [])}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "8px",
+                          padding: "8px 12px",
+                          background: hasLiked
+                            ? "rgba(245, 158, 11, 0.2)"
+                            : theme.inputBg,
+                          border: hasLiked
+                            ? `1px solid ${theme.accent}`
+                            : "none",
+                          borderRadius: "20px",
+                          cursor: "pointer",
+                          color: hasLiked ? theme.accent : "white",
+                          fontWeight: "bold",
+                          transition: "0.2s",
+                        }}
+                      >
+                        <span style={{ fontSize: "16px" }}>🔥</span> {likeCount}
+                      </button>
+                      {(isOwner || isAdmin) && (
+                        <button
+                          onClick={() => deletePost(post.id)}
+                          style={{
+                            background: "none",
+                            border: "none",
+                            color: "#ef4444",
+                            fontSize: "12px",
+                            cursor: "pointer",
+                          }}
+                        >
+                          Slet
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* ================= KOGEBOG (BLOG) ================= */}
+        {activeTab === "kogebog" && (
+          <div>
+            <h3 style={{ margin: "0 0 15px 0", color: theme.textMain }}>
+              Min Kogebog 🥩🔥
+            </h3>
+            <p
+              style={{
+                fontSize: "13px",
+                color: theme.textSub,
+                marginBottom: "20px",
+              }}
+            >
+              Smid opskrifter op med kernetemperaturer, marinader og
+              grill-tider, så de aldrig bliver glemt.
+            </p>
+
+            <div
+              style={{
+                background: theme.card,
+                padding: "15px",
+                borderRadius: "12px",
+                marginBottom: "30px",
+                border: `1px solid ${theme.accent}`,
+              }}
+            >
+              <h4 style={{ margin: "0 0 10px 0", color: theme.accent }}>
+                Tilføj Ny Opskrift
+              </h4>
+              <form onSubmit={submitRecipe}>
+                <input
+                  value={recipeTitle}
+                  onChange={(e) => setRecipeTitle(e.target.value)}
+                  placeholder="Titel (f.eks. Perfekt Grillet Ribeye)"
+                  style={{
+                    width: "100%",
+                    padding: "12px",
+                    background: theme.inputBg,
+                    color: "white",
+                    border: "none",
+                    borderRadius: "8px",
+                    boxSizing: "border-box",
+                    marginBottom: "10px",
+                    fontWeight: "bold",
+                  }}
+                />
+                <textarea
+                  value={recipeText}
+                  onChange={(e) => setRecipeText(e.target.value)}
+                  placeholder="Kernetemperatur, timer, ingredienser og marinader..."
+                  style={{
+                    width: "100%",
+                    height: "120px",
+                    background: theme.inputBg,
+                    color: "white",
+                    border: "none",
+                    borderRadius: "8px",
+                    padding: "10px",
+                    boxSizing: "border-box",
+                    marginBottom: "10px",
+                    resize: "vertical",
+                  }}
+                />
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                  }}
+                >
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => setRecipeFile(e.target.files[0])}
+                    style={{
+                      color: theme.textSub,
+                      fontSize: "12px",
+                      width: "60%",
+                    }}
+                  />
+                  <button
+                    type="submit"
+                    disabled={isPostingRecipe}
+                    style={{
+                      padding: "10px 20px",
+                      background: isPostingRecipe ? "#555" : theme.accent,
+                      color: "#000",
+                      border: "none",
+                      borderRadius: "8px",
+                      fontWeight: "bold",
+                      cursor: isPostingRecipe ? "default" : "pointer",
+                    }}
+                  >
+                    {isPostingRecipe ? "Gemmer..." : "Gem Opskrift 📖"}
+                  </button>
+                </div>
+              </form>
+            </div>
+
+            {/* Opskrifter Liste */}
+            {recipes.map((recipe) => (
+              <div
+                key={recipe.id}
+                style={{
+                  background: theme.card,
+                  borderRadius: "12px",
+                  marginBottom: "25px",
+                  overflow: "hidden",
+                  border: `1px solid ${theme.border}`,
+                }}
+              >
+                {recipe.imageUrl && (
+                  <img
+                    src={recipe.imageUrl}
+                    alt="Mad"
+                    style={{
+                      width: "100%",
+                      height: "250px",
+                      objectFit: "cover",
+                      display: "block",
+                    }}
+                  />
+                )}
+                <div style={{ padding: "20px" }}>
+                  <h2 style={{ margin: "0 0 10px 0", color: theme.accent }}>
+                    {recipe.title}
+                  </h2>
+                  <div
+                    style={{
+                      fontSize: "11px",
+                      color: theme.textSub,
+                      marginBottom: "15px",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                    }}
+                  >
+                    <img
+                      src={recipe.userPhoto || "https://via.placeholder.com/20"}
+                      alt=""
+                      style={{
+                        width: "20px",
+                        height: "20px",
+                        borderRadius: "50%",
+                      }}
+                    />
+                    Af {recipe.userName} •{" "}
+                    {recipe.createdAt
+                      ? new Date(recipe.createdAt.toDate()).toLocaleDateString()
+                      : "Lige nu"}
+                  </div>
+                  <p
+                    style={{
+                      margin: "0 0 15px 0",
+                      fontSize: "15px",
+                      lineHeight: "1.6",
+                      whiteSpace: "pre-line",
+                      color: theme.textMain,
+                    }}
+                  >
+                    {recipe.text}
+                  </p>
+
+                  {(currentUser.uid === recipe.userId || isAdmin) && (
+                    <button
+                      onClick={() => deletePost(recipe.id, "recipes")}
+                      style={{
+                        background: "none",
+                        border: "1px solid #ef4444",
+                        color: "#ef4444",
+                        padding: "6px 12px",
+                        borderRadius: "6px",
+                        fontSize: "12px",
+                        cursor: "pointer",
+                      }}
+                    >
+                      Slet Opskrift
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+            {recipes.length === 0 && (
+              <div
+                style={{
+                  textAlign: "center",
+                  color: theme.textSub,
+                  padding: "40px 0",
+                }}
+              >
+                Ingen opskrifter endnu. Fyr op for grillen! 🥩
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ================= LEADERBOARD (DUDES) ================= */}
+        {activeTab === "leaderboard" && (
+          <div>
+            <h3 style={{ margin: "0 0 15px 0", color: theme.textMain }}>
+              Sæson: {currentMonthName}
+            </h3>
             {users
               .map((u) => ({
                 ...u,
@@ -823,7 +1203,7 @@ export default function App() {
                               gap: "4px",
                             }}
                           >
-                            {user.name} {user.id === lastMonthWinnerId && "🏆"}
+                            {user.name}
                             <span
                               style={{
                                 background: rank.color + "20",
@@ -864,26 +1244,6 @@ export default function App() {
                             {user.currentMonthStats.cardioKm} km 🏃‍♂️
                           </div>
                         </div>
-                        {isMe && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setShowLogModal(true);
-                            }}
-                            style={{
-                              padding: "8px 12px",
-                              borderRadius: "8px",
-                              background: theme.accent,
-                              color: "#000",
-                              border: "none",
-                              fontSize: "12px",
-                              fontWeight: "bold",
-                              cursor: "pointer",
-                            }}
-                          >
-                            + Log
-                          </button>
-                        )}
                       </div>
                     </div>
                     {expandedUserId === user.id && (
@@ -964,437 +1324,7 @@ export default function App() {
           </div>
         )}
 
-        {activeTab === "feed" && (
-          <div>
-            <div
-              style={{
-                background: theme.card,
-                padding: "15px",
-                borderRadius: "12px",
-                marginBottom: "20px",
-                border: `1px solid ${theme.border}`,
-              }}
-            >
-              <h3
-                style={{
-                  marginTop: 0,
-                  fontSize: "16px",
-                  color: theme.textMain,
-                }}
-              >
-                Upload et Flex
-              </h3>
-              <form onSubmit={submitPost}>
-                <textarea
-                  value={postText}
-                  onChange={(e) => setPostText(e.target.value)}
-                  placeholder="Skriv noget blæret..."
-                  style={{
-                    width: "100%",
-                    height: "60px",
-                    background: theme.inputBg,
-                    color: "white",
-                    border: "none",
-                    borderRadius: "8px",
-                    padding: "10px",
-                    boxSizing: "border-box",
-                    marginBottom: "10px",
-                  }}
-                />
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                  }}
-                >
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={(e) => setPostFile(e.target.files[0])}
-                    style={{
-                      color: theme.textSub,
-                      fontSize: "12px",
-                      width: "60%",
-                    }}
-                  />
-                  <button
-                    type="submit"
-                    disabled={isPosting}
-                    style={{
-                      padding: "10px 15px",
-                      background: isPosting ? "#555" : theme.accent,
-                      color: isPosting ? "#ccc" : "#000",
-                      border: "none",
-                      borderRadius: "8px",
-                      fontWeight: "bold",
-                      cursor: isPosting ? "default" : "pointer",
-                    }}
-                  >
-                    {isPosting ? "Uploader..." : "Post Flex 📸"}
-                  </button>
-                </div>
-              </form>
-            </div>
-
-            {feed.map((post) => {
-              const hasLiked =
-                post.likes && post.likes.includes(currentUser.uid);
-              const likeCount = post.likes ? post.likes.length : 0;
-              const isOwner = currentUser.uid === post.userId;
-
-              return (
-                <div
-                  key={post.id}
-                  style={{
-                    background: theme.card,
-                    borderRadius: "12px",
-                    marginBottom: "20px",
-                    overflow: "hidden",
-                    border: post.isStrava
-                      ? "2px solid #fc4c02"
-                      : `1px solid ${theme.border}`,
-                  }}
-                >
-                  <div
-                    style={{
-                      padding: "12px",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "10px",
-                      background: post.isStrava
-                        ? "rgba(252, 76, 2, 0.1)"
-                        : "transparent",
-                    }}
-                  >
-                    <img
-                      src={post.userPhoto || "https://via.placeholder.com/40"}
-                      alt=""
-                      style={{
-                        width: "36px",
-                        height: "36px",
-                        borderRadius: "50%",
-                        objectFit: "cover",
-                      }}
-                    />
-                    <div>
-                      <div style={{ fontWeight: "bold", fontSize: "14px" }}>
-                        {post.userName} {post.isStrava && "🏃‍♂️💨"}
-                      </div>
-                      <div style={{ fontSize: "11px", color: theme.textSub }}>
-                        {post.createdAt
-                          ? new Date(post.createdAt.toDate()).toLocaleString(
-                              [],
-                              {
-                                hour: "2-digit",
-                                minute: "2-digit",
-                                day: "2-digit",
-                                month: "short",
-                              }
-                            )
-                          : "Lige nu"}
-                      </div>
-                    </div>
-                  </div>
-                  <img
-                    src={post.imageUrl}
-                    alt="Flex"
-                    style={{
-                      width: "100%",
-                      maxHeight: "400px",
-                      objectFit: "cover",
-                      display: "block",
-                    }}
-                  />
-                  <div style={{ padding: "15px" }}>
-                    {post.text && (
-                      <p
-                        style={{
-                          margin: "0 0 15px 0",
-                          fontSize: "14px",
-                          lineHeight: "1.4",
-                          whiteSpace: "pre-line",
-                        }}
-                      >
-                        {post.text}
-                      </p>
-                    )}
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                      }}
-                    >
-                      <button
-                        onClick={() => toggleLike(post.id, post.likes || [])}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "8px",
-                          padding: "8px 12px",
-                          background: hasLiked
-                            ? "rgba(245, 158, 11, 0.2)"
-                            : theme.inputBg,
-                          border: hasLiked
-                            ? `1px solid ${theme.accent}`
-                            : "none",
-                          borderRadius: "20px",
-                          cursor: "pointer",
-                          color: hasLiked ? theme.accent : "white",
-                          fontWeight: "bold",
-                          transition: "0.2s",
-                        }}
-                      >
-                        <span style={{ fontSize: "16px" }}>🔥</span> {likeCount}{" "}
-                        Hype
-                      </button>
-                      {(isOwner || isAdmin) && (
-                        <button
-                          onClick={() => deletePost(post.id)}
-                          style={{
-                            background: "none",
-                            border: "none",
-                            color: "#ef4444",
-                            fontSize: "12px",
-                            cursor: "pointer",
-                          }}
-                        >
-                          Slet
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {activeTab === "stats" && (
-          <div>
-            {users.map((user) => {
-              const allTimeCardio = user.history.reduce(
-                (sum, h) =>
-                  h.type === "cardio" && h.value ? sum + Number(h.value) : sum,
-                0
-              );
-              const allTimeGym = user.history.filter(
-                (h) => typeof h === "string" || h.type === "gym"
-              ).length;
-              const canEdit = currentUser.uid === user.id || isAdmin;
-              const rank = getRankInfo(user.history);
-
-              return (
-                <div
-                  key={user.id}
-                  style={{
-                    background: theme.card,
-                    padding: "20px",
-                    marginBottom: "10px",
-                    borderRadius: "12px",
-                  }}
-                >
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      marginBottom: "10px",
-                    }}
-                  >
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "8px",
-                      }}
-                    >
-                      <h3 style={{ margin: 0 }}>{user.name}</h3>
-                      <span
-                        style={{
-                          background: rank.color + "20",
-                          color: rank.color,
-                          padding: "2px 6px",
-                          borderRadius: "4px",
-                          fontSize: "10px",
-                          textTransform: "uppercase",
-                          fontWeight: "bold",
-                        }}
-                      >
-                        {rank.title}
-                      </span>
-                    </div>
-                    {user.id === lastMonthWinnerId && (
-                      <span style={{ fontSize: "20px" }}>🏆</span>
-                    )}
-                  </div>
-                  <div
-                    style={{
-                      display: "flex",
-                      gap: "10px",
-                      marginBottom: "20px",
-                    }}
-                  >
-                    <div
-                      style={{
-                        flex: 1,
-                        background: theme.inputBg,
-                        padding: "10px",
-                        borderRadius: "8px",
-                        textAlign: "center",
-                      }}
-                    >
-                      <div style={{ fontSize: "11px", color: theme.textSub }}>
-                        TOTALE LØFT
-                      </div>
-                      <div
-                        style={{
-                          fontSize: "18px",
-                          fontWeight: "bold",
-                          color: theme.textMain,
-                        }}
-                      >
-                        {allTimeGym}
-                      </div>
-                    </div>
-                    <div
-                      style={{
-                        flex: 1,
-                        background: theme.inputBg,
-                        padding: "10px",
-                        borderRadius: "8px",
-                        textAlign: "center",
-                      }}
-                    >
-                      <div style={{ fontSize: "11px", color: theme.textSub }}>
-                        TOTALE KM
-                      </div>
-                      <div
-                        style={{
-                          fontSize: "18px",
-                          fontWeight: "bold",
-                          color: "#60a5fa",
-                        }}
-                      >
-                        {allTimeCardio > 0
-                          ? parseFloat(allTimeCardio.toFixed(1))
-                          : 0}
-                      </div>
-                    </div>
-                  </div>
-                  <div style={{ marginBottom: "15px" }}>
-                    <div
-                      style={{
-                        fontSize: "12px",
-                        color: theme.accent,
-                        fontWeight: "bold",
-                        marginBottom: "5px",
-                      }}
-                    >
-                      STYRKE (MAKS)
-                    </div>
-                    {["bench", "squat", "deadlift"].map((lift) => (
-                      <div
-                        key={lift}
-                        onClick={() =>
-                          canEdit &&
-                          updateMax(
-                            user.id,
-                            lift,
-                            user.maxLifts[lift],
-                            user.name
-                          )
-                        }
-                        style={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          padding: "5px 0",
-                          borderBottom: "1px solid #333",
-                          cursor: canEdit ? "pointer" : "default",
-                        }}
-                      >
-                        <span style={{ textTransform: "capitalize" }}>
-                          {lift}:
-                        </span>{" "}
-                        <strong>{user.maxLifts[lift]} kg</strong>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {activeTab === "chat" && (
-          <div
-            style={{
-              height: "60vh",
-              background: theme.card,
-              borderRadius: "12px",
-              display: "flex",
-              flexDirection: "column",
-            }}
-          >
-            <div style={{ flex: 1, overflowY: "auto", padding: "15px" }}>
-              {messages.map((m) => (
-                <div
-                  key={m.id}
-                  style={{
-                    alignSelf:
-                      m.userId === currentUser.uid ? "flex-end" : "flex-start",
-                    background:
-                      m.userId === currentUser.uid ? theme.accent : "#333",
-                    color: m.userId === currentUser.uid ? "#000" : "white",
-                    padding: "8px 12px",
-                    borderRadius: "10px",
-                    marginBottom: "10px",
-                    maxWidth: "80%",
-                  }}
-                >
-                  <div style={{ fontSize: "10px", opacity: 0.7 }}>
-                    {m.userName}
-                  </div>
-                  <div>{m.text}</div>
-                </div>
-              ))}
-            </div>
-            <form
-              onSubmit={sendChatMessage}
-              style={{ display: "flex", padding: "10px", gap: "5px" }}
-            >
-              <input
-                value={newMessage}
-                onChange={(e) => setNewMessage(e.target.value)}
-                placeholder="Trash talk..."
-                style={{
-                  flex: 1,
-                  padding: "10px",
-                  borderRadius: "8px",
-                  background: theme.inputBg,
-                  color: "white",
-                  border: "none",
-                }}
-              />
-              <button
-                type="submit"
-                style={{
-                  padding: "10px 15px",
-                  background: theme.accent,
-                  border: "none",
-                  borderRadius: "8px",
-                  fontWeight: "bold",
-                  color: "#000",
-                  cursor: "pointer",
-                }}
-              >
-                Send
-              </button>
-            </form>
-          </div>
-        )}
-
+        {/* LOG MODAL */}
         {showLogModal && (
           <div
             style={{
@@ -1417,9 +1347,19 @@ export default function App() {
                 borderRadius: "16px",
                 width: "280px",
                 textAlign: "center",
+                border: `1px solid ${theme.border}`,
               }}
             >
-              <h3 style={{ marginTop: 0 }}>Hvad har du lavet?</h3>
+              <h3 style={{ marginTop: 0 }}>Log Træning</h3>
+              <p
+                style={{
+                  fontSize: "12px",
+                  color: theme.textSub,
+                  marginBottom: "20px",
+                }}
+              >
+                Deles automatisk i feedet!
+              </p>
               <button
                 onClick={() => logActivity("gym")}
                 style={{
@@ -1472,7 +1412,7 @@ export default function App() {
                     cursor: "pointer",
                   }}
                 >
-                  Hent seneste fra Strava 🟠
+                  Hent fra Strava 🟠
                 </button>
               ) : (
                 <div
@@ -1493,6 +1433,7 @@ export default function App() {
                   background: "none",
                   border: "none",
                   cursor: "pointer",
+                  fontWeight: "bold",
                 }}
               >
                 Annuller
@@ -1501,6 +1442,7 @@ export default function App() {
           </div>
         )}
 
+        {/* ================= PROFIL ================= */}
         {activeTab === "profile" && (
           <div
             style={{
@@ -1509,7 +1451,6 @@ export default function App() {
               borderRadius: "12px",
             }}
           >
-            {/* STRAVA CONNECT KNAP */}
             <div
               style={{
                 marginBottom: "20px",
