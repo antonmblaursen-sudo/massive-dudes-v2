@@ -26,9 +26,8 @@ import {
 } from "firebase/auth";
 import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
 
-// --- 👑 ADMIN & STRAVA INDSTILLINGER ---
+// --- KONFIGURATION ---
 const ADMIN_EMAIL = "antonmblaursen@gmail.com";
-
 const STRAVA_CLIENT_ID = "256210";
 const STRAVA_CLIENT_SECRET = "3253dcc72e09c9cf03c2a285dca5ea6afe507d2a";
 
@@ -60,10 +59,15 @@ export default function App() {
   const [postFile, setPostFile] = useState(null);
   const [isPosting, setIsPosting] = useState(false);
 
+  // MBL Cookbook State
   const [recipeTitle, setRecipeTitle] = useState("");
   const [recipeText, setRecipeText] = useState("");
+  const [recipeCategory, setRecipeCategory] = useState("Oksekød");
   const [recipeFile, setRecipeFile] = useState(null);
   const [isPostingRecipe, setIsPostingRecipe] = useState(false);
+  const [editingRecipeId, setEditingRecipeId] = useState(null);
+  const [existingRecipeImageUrl, setExistingRecipeImageUrl] = useState("");
+  const [selectedFilter, setSelectedFilter] = useState("Alle");
 
   const [currentUser, setCurrentUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -75,9 +79,10 @@ export default function App() {
 
   const [myBio, setMyBio] = useState("");
   const [myPhoto, setMyPhoto] = useState("");
-  const [myArc, setMyArc] = useState("Vinter Arc ❄️");
+  const [myArc, setMyArc] = useState("Vinter Arc");
 
   const isAdmin = currentUser && currentUser.email === ADMIN_EMAIL;
+
   const theme = {
     bg: "#121212",
     card: "#1E1E1E",
@@ -94,6 +99,16 @@ export default function App() {
     fontFamily: "sans-serif",
     paddingBottom: "80px",
   };
+
+  const RECIPE_CATEGORIES = [
+    "Oksekød",
+    "Fugl",
+    "Gris",
+    "Fisk",
+    "Tilbehør",
+    "Mealprep",
+    "Andet",
+  ];
 
   useEffect(() => {
     fetch(
@@ -158,7 +173,7 @@ export default function App() {
                 expiresAt: data.expires_at,
               },
             });
-            alert("Strava er forbundet! 🏃‍♂️🔥");
+            alert("Strava forbundet.");
             window.history.replaceState(
               {},
               document.title,
@@ -177,7 +192,7 @@ export default function App() {
   const fetchStravaActivity = async () => {
     const userData = users.find((u) => u.id === currentUser.uid);
     if (!userData?.stravaTokens)
-      return alert("Gå ind på 'Profil' og forbind Strava først! 🟠");
+      return alert("Forbind Strava under din Profil først.");
 
     setShowLogModal(false);
     let token = userData.stravaTokens.accessToken;
@@ -202,96 +217,80 @@ export default function App() {
     }
 
     try {
+      // Henter KUN den allernyeste aktivitet
       const res = await fetch(
-        "https://www.strava.com/api/v3/athlete/activities?per_page=5",
+        "https://www.strava.com/api/v3/athlete/activities?per_page=1",
         { headers: { Authorization: `Bearer ${token}` } }
       );
       const data = await res.json();
 
       if (data && data.length > 0) {
-        let addedCount = 0;
+        const act = data[0];
+        const distanceKm = (act.distance / 1000).toFixed(2);
+        const title = act.name;
+        const actDate = act.start_date_local.split("T")[0];
+        const stravaId = act.id.toString();
         const userHistory = userData.history || [];
 
-        for (const act of data) {
-          const distanceKm = (act.distance / 1000).toFixed(2);
-          const title = act.name;
-          const actDate = act.start_date_local.split("T")[0];
-          const stravaId = act.id.toString();
+        const alreadyLogged = userHistory.some((h) => h.stravaId === stravaId);
 
-          const alreadyLogged = userHistory.some(
-            (h) => h.stravaId === stravaId
-          );
+        if (!alreadyLogged && act.distance > 0) {
+          const hrs = Math.floor(act.moving_time / 3600);
+          const mins = Math.floor((act.moving_time % 3600) / 60)
+            .toString()
+            .padStart(2, "0");
+          const secs = (act.moving_time % 60).toString().padStart(2, "0");
+          const timeStr = hrs > 0 ? `${hrs}t ${mins}m` : `${mins}m ${secs}s`;
 
-          if (!alreadyLogged && act.distance > 0) {
-            // --- BEREGN STATS TIL FEED KORTET ---
-            const hrs = Math.floor(act.moving_time / 3600);
-            const mins = Math.floor((act.moving_time % 3600) / 60)
+          let paceStr = "0:00";
+          if (act.average_speed > 0) {
+            const paceDecimal = 16.6667 / act.average_speed;
+            const paceMin = Math.floor(paceDecimal);
+            const paceSec = Math.floor((paceDecimal - paceMin) * 60)
               .toString()
               .padStart(2, "0");
-            const secs = (act.moving_time % 60).toString().padStart(2, "0");
-            const timeStr = hrs > 0 ? `${hrs}t ${mins}m` : `${mins}m ${secs}s`;
-
-            let paceStr = "0:00";
-            if (act.average_speed > 0) {
-              const paceDecimal = 16.6667 / act.average_speed;
-              const paceMin = Math.floor(paceDecimal);
-              const paceSec = Math.floor((paceDecimal - paceMin) * 60)
-                .toString()
-                .padStart(2, "0");
-              paceStr = `${paceMin}:${paceSec}`;
-            }
-
-            const elevation = act.total_elevation_gain || 0;
-
-            const activityObj = {
-              date: actDate,
-              type: "cardio",
-              title: `🟠 ${title}`,
-              value: Number(distanceKm),
-              stravaId: stravaId,
-            };
-
-            await updateDoc(doc(db, "users", currentUser.uid), {
-              lastWorkoutDate: actDate,
-              history: arrayUnion(activityObj),
-            });
-
-            await addDoc(collection(db, "feed"), {
-              userId: currentUser.uid,
-              userName: userData.name,
-              userPhoto: userData.photoUrl || "",
-              text: title,
-              imageUrl: "", // Intet standardbillede længere!
-              likes: [],
-              createdAt: serverTimestamp(),
-              isStrava: true,
-              stravaStats: {
-                distance: distanceKm,
-                time: timeStr,
-                pace: paceStr,
-                elevation: elevation,
-              },
-            });
-            addedCount++;
+            paceStr = `${paceMin}:${paceSec}`;
           }
-        }
 
-        if (addedCount > 0) {
-          alert(
-            `SUCCES! Sugede ${addedCount} nye Strava-ture ind på feedet! 🦍💨`
-          );
+          const elevation = act.total_elevation_gain || 0;
+          const activityObj = {
+            date: actDate,
+            type: "cardio",
+            title: `Strava: ${title}`,
+            value: Number(distanceKm),
+            stravaId: stravaId,
+          };
+
+          await updateDoc(doc(db, "users", currentUser.uid), {
+            lastWorkoutDate: actDate,
+            history: arrayUnion(activityObj),
+          });
+
+          await addDoc(collection(db, "feed"), {
+            userId: currentUser.uid,
+            userName: userData.name,
+            userPhoto: userData.photoUrl || "",
+            text: title,
+            imageUrl: "",
+            likes: [],
+            createdAt: serverTimestamp(),
+            isStrava: true,
+            stravaStats: {
+              distance: distanceKm,
+              time: timeStr,
+              pace: paceStr,
+              elevation: elevation,
+            },
+          });
+          alert(`Hentede din seneste tur: ${title} (${distanceKm} km).`);
         } else {
-          alert(
-            "Ingen nye ture fundet. Du har allerede logget dine seneste ture. Ud og sved igen! 🏃‍♂️"
-          );
+          alert("Din seneste tur er allerede logget.");
         }
       } else {
-        alert("Fandt slet ingen aktiviteter på din Strava.");
+        alert("Fandt ingen aktiviteter.");
       }
     } catch (e) {
-      alert(
-        "Fejl ved hentning fra Strava. Prøv at genforbinde under din Profil."
-      );
+      alert("Fejl ved hentning. Prøv at genforbinde Strava.");
     }
   };
 
@@ -372,15 +371,17 @@ export default function App() {
           email,
           password
         );
+        // Nye brugere er IKKE godkendt som standard
         await setDoc(doc(db, "users", userCredential.user.uid), {
           name: name,
           workouts: 0,
           lastWorkoutDate: null,
           history: [],
-          bio: "Rush B, don't stop.",
+          bio: "",
           photoUrl: "",
-          arc: "Vinter Arc ❄️",
+          arc: "Vinter Arc",
           maxLifts: { bench: 0, squat: 0, deadlift: 0 },
+          isApproved: false,
         });
       } else {
         await signInWithEmailAndPassword(auth, email, password);
@@ -400,7 +401,7 @@ export default function App() {
     } else {
       distance = prompt("Hvor mange km?");
       if (distance === null) return;
-      title = prompt("Beskrivelse (f.eks. Løbetur)");
+      title = prompt("Beskrivelse");
     }
     const activityObj = {
       date: today,
@@ -418,8 +419,8 @@ export default function App() {
     const userData = users.find((u) => u.id === currentUser.uid);
     const feedText =
       type === "gym"
-        ? `Har lige trænet: ${title} 🏋️🔥`
-        : `Har lige løbet ${distance} km! 🏃‍♂️💨\n"${title}"`;
+        ? `Har lige trænet: ${title}`
+        : `Løbetur: ${distance} km\n"${title}"`;
     await addDoc(collection(db, "feed"), {
       userId: currentUser.uid,
       userName: userData.name,
@@ -430,7 +431,6 @@ export default function App() {
       createdAt: serverTimestamp(),
       isActivityLog: true,
     });
-
     setShowLogModal(false);
   };
 
@@ -447,8 +447,7 @@ export default function App() {
 
   const submitPost = async (e) => {
     e.preventDefault();
-    if (!postFile && !postText)
-      return alert("Skriv noget eller upload et billede! 📸");
+    if (!postFile && !postText) return alert("Skriv tekst eller vælg billede.");
     setIsPosting(true);
     try {
       let url = "";
@@ -470,37 +469,60 @@ export default function App() {
       setPostText("");
       setPostFile(null);
     } catch (err) {
-      alert("Fejl ved upload: " + err.message);
+      alert("Fejl: " + err.message);
     }
     setIsPosting(false);
   };
 
   const submitRecipe = async (e) => {
     e.preventDefault();
-    if (!recipeFile) return alert("Husk et lækkert billede af maden! 🥩");
-    if (!recipeTitle) return alert("Giv opskriften en titel!");
+    if (!recipeTitle) return alert("Giv opskriften en titel.");
     setIsPostingRecipe(true);
     try {
-      const imgRef = ref(storage, `recipes/${currentUser.uid}_${Date.now()}`);
-      await uploadBytes(imgRef, recipeFile);
-      const url = await getDownloadURL(imgRef);
+      let url = existingRecipeImageUrl;
+      if (recipeFile) {
+        const imgRef = ref(storage, `recipes/${currentUser.uid}_${Date.now()}`);
+        await uploadBytes(imgRef, recipeFile);
+        url = await getDownloadURL(imgRef);
+      }
       const userData = users.find((u) => u.id === currentUser.uid);
-      await addDoc(collection(db, "recipes"), {
+
+      const recipeData = {
         userId: currentUser.uid,
         userName: userData.name,
         userPhoto: userData.photoUrl || "",
         title: recipeTitle,
         text: recipeText,
+        category: recipeCategory,
         imageUrl: url,
-        createdAt: serverTimestamp(),
-      });
+        updatedAt: serverTimestamp(),
+      };
+
+      if (editingRecipeId) {
+        await updateDoc(doc(db, "recipes", editingRecipeId), recipeData);
+      } else {
+        recipeData.createdAt = serverTimestamp();
+        await addDoc(collection(db, "recipes"), recipeData);
+      }
+
       setRecipeTitle("");
       setRecipeText("");
       setRecipeFile(null);
+      setExistingRecipeImageUrl("");
+      setEditingRecipeId(null);
     } catch (err) {
-      alert("Fejl ved upload: " + err.message);
+      alert("Fejl: " + err.message);
     }
     setIsPostingRecipe(false);
+  };
+
+  const editRecipe = (recipe) => {
+    setEditingRecipeId(recipe.id);
+    setRecipeTitle(recipe.title);
+    setRecipeText(recipe.text);
+    setRecipeCategory(recipe.category || "Oksekød");
+    setExistingRecipeImageUrl(recipe.imageUrl || "");
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const toggleLike = async (postId, currentLikes) => {
@@ -532,6 +554,22 @@ export default function App() {
     }
   };
 
+  const toggleAdminApproval = async (uid, isCurrentlyApproved) => {
+    await updateDoc(doc(db, "users", uid), {
+      isApproved: !isCurrentlyApproved,
+    });
+  };
+
+  const adminDeleteUser = async (uid, name) => {
+    if (
+      window.confirm(
+        `Er du sikker på, at du vil fjerne ${name} fra databasen permanent?`
+      )
+    ) {
+      await deleteDoc(doc(db, "users", uid));
+    }
+  };
+
   if (loading)
     return (
       <div
@@ -542,7 +580,7 @@ export default function App() {
           color: theme.accent,
         }}
       >
-        <h2>Indlæser...</h2>
+        Indlæser...
       </div>
     );
 
@@ -565,8 +603,18 @@ export default function App() {
               marginTop: "50px",
             }}
           >
-            <h1 style={{ color: theme.accent, marginTop: 0 }}>MIN APP</h1>
-            {errorMsg && <p style={{ color: "#ef4444" }}>{errorMsg}</p>}
+            <h1
+              style={{
+                color: theme.accent,
+                marginTop: 0,
+                letterSpacing: "1px",
+              }}
+            >
+              MASSIVE DUDES
+            </h1>
+            {errorMsg && (
+              <p style={{ color: "#ef4444", fontSize: "13px" }}>{errorMsg}</p>
+            )}
             <form
               onSubmit={handleAuth}
               style={{
@@ -629,7 +677,7 @@ export default function App() {
                   cursor: "pointer",
                 }}
               >
-                {isRegistering ? "Opret" : "Log Ind"}
+                {isRegistering ? "Opret Konto" : "Log Ind"}
               </button>
             </form>
             <p
@@ -638,9 +686,12 @@ export default function App() {
                 color: theme.textSub,
                 cursor: "pointer",
                 marginTop: "15px",
+                fontSize: "14px",
               }}
             >
-              {isRegistering ? "Log ind" : "Opret profil"}
+              {isRegistering
+                ? "Har du en konto? Log ind"
+                : "Ny her? Opret konto"}
             </p>
           </div>
         </div>
@@ -648,7 +699,64 @@ export default function App() {
     );
   }
 
-  const currentUserData = users.find((u) => u.id === currentUser.uid) || {};
+  const currentUserData = users.find((u) => u.id === currentUser.uid);
+  const isApproved = isAdmin || (currentUserData && currentUserData.isApproved);
+
+  // --- LÅST SKÆRM FOR NYE BRUGERE ---
+  if (currentUserData && !isApproved) {
+    return (
+      <div style={mainStyle}>
+        <div
+          style={{
+            padding: "40px 20px",
+            maxWidth: "400px",
+            margin: "0 auto",
+            textAlign: "center",
+          }}
+        >
+          <div
+            style={{
+              background: theme.card,
+              borderRadius: "16px",
+              padding: "30px",
+              marginTop: "50px",
+              border: `1px solid ${theme.border}`,
+            }}
+          >
+            <h2 style={{ color: theme.accent }}>Afventer Godkendelse</h2>
+            <p
+              style={{
+                color: theme.textSub,
+                fontSize: "14px",
+                lineHeight: "1.5",
+              }}
+            >
+              Din konto er oprettet, men du mangler at blive godkendt af admin,
+              før du får adgang til platformen.
+            </p>
+            <button
+              onClick={() => signOut(auth)}
+              style={{
+                marginTop: "20px",
+                padding: "10px 20px",
+                background: theme.inputBg,
+                color: "white",
+                border: "none",
+                borderRadius: "8px",
+                cursor: "pointer",
+              }}
+            >
+              Log ud
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const filteredRecipes = recipes.filter(
+    (r) => selectedFilter === "Alle" || r.category === selectedFilter
+  );
 
   return (
     <div style={mainStyle}>
@@ -687,18 +795,18 @@ export default function App() {
           }}
         >
           {[
-            { id: "feed", icon: "📱", label: "Feed" },
-            { id: "kogebog", icon: "🥩", label: "Opskrifter" },
-            { id: "leaderboard", icon: "🏆", label: "Dudes" },
-            { id: "profile", icon: "⚙️", label: "Profil" },
+            { id: "feed", icon: "Feed" },
+            { id: "kogebog", icon: "Cookbook" },
+            { id: "leaderboard", icon: "Dudes" },
+            { id: "profile", icon: "Profil" },
           ].map((t) => (
             <button
               key={t.id}
               onClick={() => {
                 setActiveTab(t.id);
                 if (t.id === "profile") {
-                  setMyBio(currentUserData.bio || "");
-                  setMyArc(currentUserData.arc || "Vinter Arc ❄️");
+                  setMyBio(currentUserData?.bio || "");
+                  setMyArc(currentUserData?.arc || "Vinter Arc");
                 }
               }}
               style={{
@@ -710,18 +818,32 @@ export default function App() {
                   activeTab === t.id ? theme.accent : "transparent",
                 color: activeTab === t.id ? "#000" : theme.textSub,
                 fontWeight: "bold",
-                fontSize: "11px",
+                fontSize: "12px",
                 cursor: "pointer",
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                gap: "4px",
               }}
             >
-              <span style={{ fontSize: "16px" }}>{t.icon}</span>
-              {t.label}
+              {t.icon}
             </button>
           ))}
+          {isAdmin && (
+            <button
+              onClick={() => setActiveTab("admin")}
+              style={{
+                flex: 1,
+                padding: "10px 0",
+                borderRadius: "8px",
+                border: "none",
+                backgroundColor:
+                  activeTab === "admin" ? "#ef4444" : "transparent",
+                color: activeTab === "admin" ? "#fff" : theme.textSub,
+                fontWeight: "bold",
+                fontSize: "12px",
+                cursor: "pointer",
+              }}
+            >
+              Admin
+            </button>
+          )}
         </div>
 
         {activeTab === "feed" && (
@@ -746,7 +868,6 @@ export default function App() {
                   fontSize: "13px",
                   fontWeight: "bold",
                   cursor: "pointer",
-                  boxShadow: "0 2px 10px rgba(245, 158, 11, 0.3)",
                 }}
               >
                 + Log Træning
@@ -766,7 +887,7 @@ export default function App() {
                 <textarea
                   value={postText}
                   onChange={(e) => setPostText(e.target.value)}
-                  placeholder="Hvad sker der bro? Smid et flex..."
+                  placeholder="Skriv et opslag..."
                   style={{
                     width: "100%",
                     height: "50px",
@@ -810,7 +931,7 @@ export default function App() {
                       cursor: isPosting ? "default" : "pointer",
                     }}
                   >
-                    {isPosting ? "..." : "Post 📸"}
+                    {isPosting ? "..." : "Post"}
                   </button>
                 </div>
               </form>
@@ -831,9 +952,7 @@ export default function App() {
                     marginBottom: "20px",
                     overflow: "hidden",
                     border: post.isStrava
-                      ? "2px solid #fc4c02"
-                      : post.isActivityLog
-                      ? "1px solid #3b82f6"
+                      ? "1px solid #fc4c02"
                       : `1px solid ${theme.border}`,
                   }}
                 >
@@ -844,9 +963,7 @@ export default function App() {
                       alignItems: "center",
                       gap: "10px",
                       background: post.isStrava
-                        ? "rgba(252, 76, 2, 0.1)"
-                        : post.isActivityLog
-                        ? "rgba(59, 130, 246, 0.1)"
+                        ? "rgba(252, 76, 2, 0.05)"
                         : "transparent",
                     }}
                   >
@@ -862,7 +979,12 @@ export default function App() {
                     />
                     <div>
                       <div style={{ fontWeight: "bold", fontSize: "14px" }}>
-                        {post.userName} {post.isStrava && "🟠"}
+                        {post.userName}{" "}
+                        {post.isStrava && (
+                          <span style={{ color: "#fc4c02", fontSize: "12px" }}>
+                            Strava
+                          </span>
+                        )}
                       </div>
                       <div style={{ fontSize: "11px", color: theme.textSub }}>
                         {post.createdAt
@@ -880,7 +1002,6 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* === DET NYE BRUTALE STRAVA STAT-CARD === */}
                   {post.isStrava && post.stravaStats ? (
                     <div
                       style={{
@@ -907,7 +1028,6 @@ export default function App() {
                         >
                           {post.text}
                         </h4>
-                        <span style={{ fontSize: "20px" }}>🏃‍♂️</span>
                       </div>
                       <div
                         style={{
@@ -986,19 +1106,6 @@ export default function App() {
                           </div>
                         </div>
                       </div>
-                      {post.stravaStats.elevation > 0 && (
-                        <div
-                          style={{
-                            textAlign: "center",
-                            marginTop: "12px",
-                            fontSize: "12px",
-                            opacity: 0.9,
-                            fontWeight: "bold",
-                          }}
-                        >
-                          ⛰️ {post.stravaStats.elevation} m stigning
-                        </div>
-                      )}
                     </div>
                   ) : post.imageUrl ? (
                     <img
@@ -1012,7 +1119,6 @@ export default function App() {
                       }}
                     />
                   ) : null}
-                  {/* ========================================== */}
 
                   <div style={{ padding: "15px" }}>
                     {post.text && !post.isStrava && (
@@ -1041,7 +1147,7 @@ export default function App() {
                           display: "flex",
                           alignItems: "center",
                           gap: "8px",
-                          padding: "8px 12px",
+                          padding: "6px 12px",
                           background: hasLiked
                             ? "rgba(245, 158, 11, 0.2)"
                             : theme.inputBg,
@@ -1052,10 +1158,9 @@ export default function App() {
                           cursor: "pointer",
                           color: hasLiked ? theme.accent : "white",
                           fontWeight: "bold",
-                          transition: "0.2s",
                         }}
                       >
-                        <span style={{ fontSize: "16px" }}>🔥</span> {likeCount}
+                        Hype ({likeCount})
                       </button>
                       {(isOwner || isAdmin) && (
                         <button
@@ -1082,19 +1187,83 @@ export default function App() {
         {activeTab === "kogebog" && (
           <div>
             <h3 style={{ margin: "0 0 15px 0", color: theme.textMain }}>
-              Min Kogebog 🥩🔥
+              MBL COOKBOOK
             </h3>
-            <p
+
+            {/* OVERSIGT / INDEX */}
+            <div
               style={{
-                fontSize: "13px",
-                color: theme.textSub,
+                background: theme.card,
+                padding: "15px",
+                borderRadius: "12px",
                 marginBottom: "20px",
+                border: `1px solid ${theme.border}`,
               }}
             >
-              Smid opskrifter op med kernetemperaturer, marinader og
-              grill-tider, så de aldrig bliver glemt.
-            </p>
+              <div
+                style={{
+                  display: "flex",
+                  overflowX: "auto",
+                  gap: "10px",
+                  paddingBottom: "10px",
+                  marginBottom: "10px",
+                  borderBottom: `1px solid ${theme.border}`,
+                }}
+              >
+                {["Alle", ...RECIPE_CATEGORIES].map((cat) => (
+                  <button
+                    key={cat}
+                    onClick={() => setSelectedFilter(cat)}
+                    style={{
+                      padding: "6px 12px",
+                      borderRadius: "20px",
+                      whiteSpace: "nowrap",
+                      border: "none",
+                      background:
+                        selectedFilter === cat ? theme.accent : theme.inputBg,
+                      color: selectedFilter === cat ? "#000" : theme.textMain,
+                      cursor: "pointer",
+                      fontSize: "12px",
+                      fontWeight: "bold",
+                    }}
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
+              <div style={{ maxHeight: "150px", overflowY: "auto" }}>
+                {filteredRecipes.map((r) => (
+                  <div
+                    key={"link-" + r.id}
+                    onClick={() =>
+                      document
+                        .getElementById(r.id)
+                        ?.scrollIntoView({ behavior: "smooth" })
+                    }
+                    style={{
+                      padding: "8px 0",
+                      borderBottom: "1px solid #333",
+                      fontSize: "13px",
+                      cursor: "pointer",
+                      display: "flex",
+                      justifyContent: "space-between",
+                    }}
+                  >
+                    <span>{r.title}</span>
+                    <span style={{ color: theme.textSub, fontSize: "11px" }}>
+                      {r.category}
+                    </span>
+                  </div>
+                ))}
+                {filteredRecipes.length === 0 && (
+                  <div style={{ fontSize: "12px", color: theme.textSub }}>
+                    Ingen opskrifter i denne kategori.
+                  </div>
+                )}
+              </div>
+            </div>
 
+            {/* OPRET / REDIGER FORM */}
             <div
               style={{
                 background: theme.card,
@@ -1105,13 +1274,13 @@ export default function App() {
               }}
             >
               <h4 style={{ margin: "0 0 10px 0", color: theme.accent }}>
-                Tilføj Ny Opskrift
+                {editingRecipeId ? "Rediger Opskrift" : "Tilføj Ny Opskrift"}
               </h4>
               <form onSubmit={submitRecipe}>
                 <input
                   value={recipeTitle}
                   onChange={(e) => setRecipeTitle(e.target.value)}
-                  placeholder="Titel (f.eks. Perfekt Grillet Ribeye)"
+                  placeholder="Titel..."
                   style={{
                     width: "100%",
                     padding: "12px",
@@ -1124,10 +1293,31 @@ export default function App() {
                     fontWeight: "bold",
                   }}
                 />
+
+                <select
+                  value={recipeCategory}
+                  onChange={(e) => setRecipeCategory(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: "12px",
+                    background: theme.inputBg,
+                    color: "white",
+                    border: "none",
+                    borderRadius: "8px",
+                    marginBottom: "10px",
+                  }}
+                >
+                  {RECIPE_CATEGORIES.map((cat) => (
+                    <option key={cat} value={cat}>
+                      {cat}
+                    </option>
+                  ))}
+                </select>
+
                 <textarea
                   value={recipeText}
                   onChange={(e) => setRecipeText(e.target.value)}
-                  placeholder="Kernetemperatur, timer, ingredienser og marinader..."
+                  placeholder="Fremgangsmåde, tid, temp..."
                   style={{
                     width: "100%",
                     height: "120px",
@@ -1141,6 +1331,7 @@ export default function App() {
                     resize: "vertical",
                   }}
                 />
+
                 <div
                   style={{
                     display: "flex",
@@ -1148,21 +1339,34 @@ export default function App() {
                     alignItems: "center",
                   }}
                 >
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={(e) => setRecipeFile(e.target.files[0])}
-                    style={{
-                      color: theme.textSub,
-                      fontSize: "12px",
-                      width: "60%",
-                    }}
-                  />
+                  <div style={{ width: "60%" }}>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => setRecipeFile(e.target.files[0])}
+                      style={{
+                        color: theme.textSub,
+                        fontSize: "12px",
+                        width: "100%",
+                      }}
+                    />
+                    {existingRecipeImageUrl && !recipeFile && (
+                      <div
+                        style={{
+                          fontSize: "10px",
+                          color: theme.accent,
+                          marginTop: "4px",
+                        }}
+                      >
+                        Billede gemt. Upload nyt for at overskrive.
+                      </div>
+                    )}
+                  </div>
                   <button
                     type="submit"
                     disabled={isPostingRecipe}
                     style={{
-                      padding: "10px 20px",
+                      padding: "10px 15px",
                       background: isPostingRecipe ? "#555" : theme.accent,
                       color: "#000",
                       border: "none",
@@ -1171,14 +1375,42 @@ export default function App() {
                       cursor: isPostingRecipe ? "default" : "pointer",
                     }}
                   >
-                    {isPostingRecipe ? "Gemmer..." : "Gem Opskrift 📖"}
+                    {isPostingRecipe
+                      ? "..."
+                      : editingRecipeId
+                      ? "Opdater"
+                      : "Gem"}
                   </button>
                 </div>
+                {editingRecipeId && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingRecipeId(null);
+                      setRecipeTitle("");
+                      setRecipeText("");
+                      setExistingRecipeImageUrl("");
+                    }}
+                    style={{
+                      width: "100%",
+                      marginTop: "10px",
+                      background: "none",
+                      color: theme.textSub,
+                      border: "none",
+                      cursor: "pointer",
+                      fontSize: "12px",
+                    }}
+                  >
+                    Annuller redigering
+                  </button>
+                )}
               </form>
             </div>
 
-            {recipes.map((recipe) => (
+            {/* LISTE */}
+            {filteredRecipes.map((recipe) => (
               <div
+                id={recipe.id}
                 key={recipe.id}
                 style={{
                   background: theme.card,
@@ -1201,37 +1433,43 @@ export default function App() {
                   />
                 )}
                 <div style={{ padding: "20px" }}>
-                  <h2 style={{ margin: "0 0 10px 0", color: theme.accent }}>
-                    {recipe.title}
-                  </h2>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "flex-start",
+                    }}
+                  >
+                    <h2 style={{ margin: "0 0 5px 0", color: theme.accent }}>
+                      {recipe.title}
+                    </h2>
+                    <span
+                      style={{
+                        fontSize: "10px",
+                        background: theme.inputBg,
+                        padding: "4px 8px",
+                        borderRadius: "12px",
+                      }}
+                    >
+                      {recipe.category}
+                    </span>
+                  </div>
                   <div
                     style={{
                       fontSize: "11px",
                       color: theme.textSub,
                       marginBottom: "15px",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "8px",
                     }}
                   >
-                    <img
-                      src={recipe.userPhoto || "https://via.placeholder.com/20"}
-                      alt=""
-                      style={{
-                        width: "20px",
-                        height: "20px",
-                        borderRadius: "50%",
-                      }}
-                    />
                     Af {recipe.userName} •{" "}
                     {recipe.createdAt
                       ? new Date(recipe.createdAt.toDate()).toLocaleDateString()
-                      : "Lige nu"}
+                      : ""}
                   </div>
                   <p
                     style={{
                       margin: "0 0 15px 0",
-                      fontSize: "15px",
+                      fontSize: "14px",
                       lineHeight: "1.6",
                       whiteSpace: "pre-line",
                       color: theme.textMain,
@@ -1241,35 +1479,48 @@ export default function App() {
                   </p>
 
                   {(currentUser.uid === recipe.userId || isAdmin) && (
-                    <button
-                      onClick={() => deletePost(recipe.id, "recipes")}
+                    <div
                       style={{
-                        background: "none",
-                        border: "1px solid #ef4444",
-                        color: "#ef4444",
-                        padding: "6px 12px",
-                        borderRadius: "6px",
-                        fontSize: "12px",
-                        cursor: "pointer",
+                        display: "flex",
+                        gap: "10px",
+                        marginTop: "20px",
+                        borderTop: "1px solid #333",
+                        paddingTop: "15px",
                       }}
                     >
-                      Slet Opskrift
-                    </button>
+                      <button
+                        onClick={() => editRecipe(recipe)}
+                        style={{
+                          background: theme.inputBg,
+                          color: "white",
+                          border: "none",
+                          padding: "6px 12px",
+                          borderRadius: "6px",
+                          fontSize: "12px",
+                          cursor: "pointer",
+                        }}
+                      >
+                        Rediger
+                      </button>
+                      <button
+                        onClick={() => deletePost(recipe.id, "recipes")}
+                        style={{
+                          background: "none",
+                          border: "1px solid #ef4444",
+                          color: "#ef4444",
+                          padding: "6px 12px",
+                          borderRadius: "6px",
+                          fontSize: "12px",
+                          cursor: "pointer",
+                        }}
+                      >
+                        Slet
+                      </button>
+                    </div>
                   )}
                 </div>
               </div>
             ))}
-            {recipes.length === 0 && (
-              <div
-                style={{
-                  textAlign: "center",
-                  color: theme.textSub,
-                  padding: "40px 0",
-                }}
-              >
-                Ingen opskrifter endnu. Fyr op for grillen! 🥩
-              </div>
-            )}
           </div>
         )}
 
@@ -1279,6 +1530,7 @@ export default function App() {
               Sæson: {currentMonthName}
             </h3>
             {users
+              .filter((u) => u.isApproved)
               .map((u) => ({
                 ...u,
                 currentMonthStats: getStatsForMonth(u.history),
@@ -1381,7 +1633,7 @@ export default function App() {
                               marginTop: "2px",
                             }}
                           >
-                            {user.arc || "Vinter Arc ❄️"} | {streak} streak 🔥
+                            {user.arc || "Vinter Arc"} | {streak} streak 🔥
                           </div>
                         </div>
                       </div>
@@ -1446,7 +1698,7 @@ export default function App() {
                                 cursor: "pointer",
                               }}
                             >
-                              Slet log 💀
+                              Slet log
                             </button>
                           )}
                         </div>
@@ -1477,6 +1729,137 @@ export default function App() {
                   </div>
                 );
               })}
+          </div>
+        )}
+
+        {/* ADMIN PANEL */}
+        {isAdmin && activeTab === "admin" && (
+          <div>
+            <h3
+              style={{
+                color: "#ef4444",
+                borderBottom: "1px solid #ef4444",
+                paddingBottom: "10px",
+              }}
+            >
+              Admin Panel
+            </h3>
+
+            <h4 style={{ color: theme.textMain, marginTop: "20px" }}>
+              Nye Brugere (Afventer)
+            </h4>
+            {users
+              .filter((u) => !u.isApproved)
+              .map((user) => (
+                <div
+                  key={user.id}
+                  style={{
+                    background: theme.card,
+                    padding: "15px",
+                    borderRadius: "8px",
+                    marginBottom: "10px",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    border: "1px solid #ef4444",
+                  }}
+                >
+                  <div>
+                    <div style={{ fontWeight: "bold" }}>{user.name}</div>
+                    <div style={{ fontSize: "11px", color: theme.textSub }}>
+                      ID: {user.id}
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: "10px" }}>
+                    <button
+                      onClick={() => toggleAdminApproval(user.id, false)}
+                      style={{
+                        background: "#10b981",
+                        color: "white",
+                        border: "none",
+                        padding: "8px 12px",
+                        borderRadius: "6px",
+                        cursor: "pointer",
+                        fontWeight: "bold",
+                      }}
+                    >
+                      Godkend
+                    </button>
+                    <button
+                      onClick={() => adminDeleteUser(user.id, user.name)}
+                      style={{
+                        background: "transparent",
+                        border: "1px solid #ef4444",
+                        color: "#ef4444",
+                        padding: "8px",
+                        borderRadius: "6px",
+                        cursor: "pointer",
+                      }}
+                    >
+                      Slet
+                    </button>
+                  </div>
+                </div>
+              ))}
+            {users.filter((u) => !u.isApproved).length === 0 && (
+              <p style={{ fontSize: "12px", color: theme.textSub }}>
+                Ingen nye brugere venter.
+              </p>
+            )}
+
+            <h4 style={{ color: theme.textMain, marginTop: "30px" }}>
+              Godkendte Brugere
+            </h4>
+            {users
+              .filter((u) => u.isApproved)
+              .map((user) => (
+                <div
+                  key={user.id}
+                  style={{
+                    background: theme.card,
+                    padding: "10px 15px",
+                    borderRadius: "8px",
+                    marginBottom: "8px",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                  }}
+                >
+                  <div style={{ fontWeight: "bold", fontSize: "14px" }}>
+                    {user.name}
+                  </div>
+                  <div style={{ display: "flex", gap: "10px" }}>
+                    <button
+                      onClick={() => toggleAdminApproval(user.id, true)}
+                      style={{
+                        background: theme.inputBg,
+                        color: theme.textSub,
+                        border: "none",
+                        padding: "6px 10px",
+                        borderRadius: "6px",
+                        fontSize: "12px",
+                        cursor: "pointer",
+                      }}
+                    >
+                      Fjern Adgang
+                    </button>
+                    {user.email !== ADMIN_EMAIL && (
+                      <button
+                        onClick={() => adminDeleteUser(user.id, user.name)}
+                        style={{
+                          background: "transparent",
+                          border: "none",
+                          color: "#ef4444",
+                          fontSize: "12px",
+                          cursor: "pointer",
+                        }}
+                      >
+                        Slet Bruger
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
           </div>
         )}
 
@@ -1513,7 +1896,7 @@ export default function App() {
                   marginBottom: "20px",
                 }}
               >
-                Deles automatisk i feedet!
+                Deles automatisk i feedet.
               </p>
               <button
                 onClick={() => logActivity("gym")}
@@ -1529,7 +1912,7 @@ export default function App() {
                   cursor: "pointer",
                 }}
               >
-                🏋️ Styrketræning
+                Styrketræning
               </button>
               <button
                 onClick={() => logActivity("cardio")}
@@ -1545,14 +1928,14 @@ export default function App() {
                   cursor: "pointer",
                 }}
               >
-                🏃‍♂️ Cardio / Løb
+                Cardio / Løb
               </button>
 
               <div
                 style={{ height: "1px", background: "#444", margin: "15px 0" }}
               ></div>
 
-              {currentUserData.stravaTokens ? (
+              {currentUserData?.stravaTokens ? (
                 <button
                   onClick={fetchStravaActivity}
                   style={{
@@ -1567,7 +1950,7 @@ export default function App() {
                     cursor: "pointer",
                   }}
                 >
-                  Hent fra Strava 🟠
+                  Hent seneste fra Strava
                 </button>
               ) : (
                 <div
@@ -1577,7 +1960,7 @@ export default function App() {
                     marginBottom: "15px",
                   }}
                 >
-                  Forbind Strava under 'Profil' for auto-log
+                  Forbind Strava under Profil for auto-log
                 </div>
               )}
 
@@ -1620,7 +2003,7 @@ export default function App() {
               >
                 STRAVA INTEGRATION
               </h4>
-              {currentUserData.stravaTokens ? (
+              {currentUserData?.stravaTokens ? (
                 <p
                   style={{
                     color: "#10b981",
@@ -1629,7 +2012,7 @@ export default function App() {
                     fontSize: "13px",
                   }}
                 >
-                  ✅ Strava er forbundet!
+                  ✅ Strava er forbundet
                 </p>
               ) : (
                 <button
@@ -1645,7 +2028,7 @@ export default function App() {
                     width: "100%",
                   }}
                 >
-                  Forbind Strava 🟠
+                  Forbind Strava
                 </button>
               )}
             </div>
@@ -1663,13 +2046,13 @@ export default function App() {
               </label>
               <div style={{ display: "flex", gap: "10px" }}>
                 <button
-                  onClick={() => setMyArc("Vinter Arc ❄️")}
+                  onClick={() => setMyArc("Vinter Arc")}
                   style={{
                     flex: 1,
                     padding: "10px",
                     borderRadius: "8px",
                     border:
-                      myArc === "Vinter Arc ❄️"
+                      myArc === "Vinter Arc"
                         ? `2px solid ${theme.accent}`
                         : "2px solid transparent",
                     background: theme.inputBg,
@@ -1677,16 +2060,16 @@ export default function App() {
                     cursor: "pointer",
                   }}
                 >
-                  Vinter ❄️
+                  Vinter
                 </button>
                 <button
-                  onClick={() => setMyArc("Sommer Arc ☀️")}
+                  onClick={() => setMyArc("Sommer Arc")}
                   style={{
                     flex: 1,
                     padding: "10px",
                     borderRadius: "8px",
                     border:
-                      myArc === "Sommer Arc ☀️"
+                      myArc === "Sommer Arc"
                         ? `2px solid ${theme.accent}`
                         : "2px solid transparent",
                     background: theme.inputBg,
@@ -1694,7 +2077,7 @@ export default function App() {
                     cursor: "pointer",
                   }}
                 >
-                  Sommer ☀️
+                  Sommer
                 </button>
               </div>
             </div>
@@ -1736,7 +2119,7 @@ export default function App() {
             <input
               type="file"
               onChange={handleImageUpload}
-              style={{ marginTop: "5px" }}
+              style={{ marginTop: "5px", fontSize: "12px" }}
             />
             <button
               onClick={async () => {
@@ -1769,7 +2152,7 @@ export default function App() {
                 border: "1px solid #ef4444",
                 padding: "10px",
                 borderRadius: "8px",
-                marginTop: "10px",
+                marginTop: "15px",
                 cursor: "pointer",
               }}
             >
